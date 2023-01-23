@@ -57,7 +57,7 @@ public class TaskSyncContext {
 
     public TaskSyncEvent buildTaskSyncEvent(MessageTypeEnum messageType) {
         return TaskSyncEvent.builder().epochOffset(this.epochOffsetHolder.getEpochOffset()).taskStates(
-                this.getAllTaskStates())
+                this.getCurrentTaskStateMap())
                 .taskUid(this.getTaskUid())
                 .consumerId(this.getConsumerId())
                 .rebalanceGenerationId(this.getRebalanceGenerationId())
@@ -326,6 +326,15 @@ public class TaskSyncContext {
 
     public TaskState getCurrentTaskState() {
         return this.currentTaskState;
+    }
+
+    public Map<String, TaskState> getCurrentTaskStateMap() {
+        Map<String, TaskState> currentTaskStateMap = new HashMap<>();
+        currentTaskStateMap.put(this.taskUid, currentTaskState.toBuilder()
+                .consumerId(consumerId)
+                .rebalanceGenerationId(rebalanceGenerationId)
+                .stateTimestamp(Instant.now().toEpochMilli()).build());
+        return currentTaskStateMap;
     }
 
     public Timestamp getDatabaseSchemaTimestamp() {

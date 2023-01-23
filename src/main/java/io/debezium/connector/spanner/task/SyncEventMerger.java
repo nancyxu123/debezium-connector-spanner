@@ -32,6 +32,7 @@ public class SyncEventMerger {
     public static TaskSyncContext merge(TaskSyncContext context, TaskSyncEvent inSync) {
         Map<String, TaskState> newTaskStatesMap = inSync.getTaskStates();
         debug(LOGGER, "merge: state before {}, \nIncoming states: {}", context, newTaskStatesMap);
+        // LOGGER.info("merge: state before {}, \nIncoming states: {}", context, newTaskStatesMap);
 
         var builder = context.toBuilder();
 
@@ -71,6 +72,8 @@ public class SyncEventMerger {
             TaskSyncContext result = builder
                     .build();
 
+            // LOGGER.info("merge: final state {}, \nUpdated uids: {}, epoch: {}",
+            // result, updatedStatesUids, result.getRebalanceGenerationId());
             debug(LOGGER, "merge: final state {}, \nUpdated uids: {}, epoch: {}",
                     result, updatedStatesUids, result.getRebalanceGenerationId());
 

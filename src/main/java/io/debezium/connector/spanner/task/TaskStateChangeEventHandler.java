@@ -54,6 +54,9 @@ public class TaskStateChangeEventHandler {
     private final Consumer<RuntimeException> errorHandler;
 
     private final AtomicLong failOverloadedTaskTimer = new AtomicLong(System.currentTimeMillis());
+    private long numSyncEvents = 0;
+    private long numChildPartitionEvents = 0;
+    private long numPartitionStatusUpdateEvents = 0;
 
     public TaskStateChangeEventHandler(TaskSyncContextHolder taskSyncContextHolder,
                                        TaskSyncPublisher taskSyncPublisher,
@@ -75,12 +78,15 @@ public class TaskStateChangeEventHandler {
         LOGGER.debug("process TaskStateChangeEvent of type: {}", syncEvent.getClass().getSimpleName());
 
         if (syncEvent instanceof PartitionStatusUpdateEvent) {
+            numPartitionStatusUpdateEvents++;
             processEvent((PartitionStatusUpdateEvent) syncEvent);
         }
         else if (syncEvent instanceof NewPartitionsEvent) {
+            numChildPartitionEvents++;
             processEvent((NewPartitionsEvent) syncEvent);
         }
         else if (syncEvent instanceof SyncEvent) {
+            numSyncEvents++;
             processSyncEvent();
 
         }
@@ -98,10 +104,13 @@ public class TaskStateChangeEventHandler {
     }
 
     private void processEvent(NewPartitionsEvent newPartitionsEvent) throws InterruptedException {
+        LOGGER.info(
+                "Processing NewPartitionsEvent in TaskStateChangeEventHandler: {} with numSyncEvents {}, numChildPartitionEvents {}, numPartitionStatusUpdateEvents{}",
+                newPartitionsEvent, numSyncEvents, numChildPartitionEvents, numPartitionStatusUpdateEvents);
         performOperation(
                 new ChildPartitionOperation(newPartitionsEvent.getPartitions()),
-                new FindPartitionForStreamingOperation(),
                 new CheckPartitionDuplicationOperation(changeStream),
+                new FindPartitionForStreamingOperation(),
                 new TakePartitionForStreamingOperation(changeStream, partitionFactory),
                 new RemoveFinishedPartitionOperation());
     }

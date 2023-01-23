@@ -104,13 +104,14 @@ public class LeaderService {
 
         TimeoutMeter timeoutMeter = TimeoutMeter.setTimeout(AWAIT_TASK_ANSWER_DURATION);
 
-        LOGGER.info("awaitAllNewTaskStateUpdates: " +
-                "expected: {}, actual: {}. Expected consumers: {}", consumers.size(), consumerToTaskMap.size(), consumers);
-
         while (consumerToTaskMap.size() < consumers.size()) {
 
             if (timeoutMeter.isExpired()) {
-                LOGGER.error("Task {} : Not received all answers from tasks", taskSyncContextHolder.get().getTaskUid());
+                LOGGER.error("Task {} : Not received all answers from tasks, consumers {}, consumerToTaskMap {}, taskSyncContext {}, reb",
+                        taskSyncContextHolder.get().getTaskUid(), consumers, consumerToTaskMap,
+                        taskSyncContextHolder.get().getAllTaskStates());
+                LOGGER.error("awaitAllNewTaskStateUpdates: " +
+                        "expected: {}, actual: {}. Expected consumers: {}", consumers.size(), consumerToTaskMap.size(), consumers);
                 errorHandler.setProducerThrowable(new SpannerConnectorException("Not received all answers from tasks"));
                 break;
             }
@@ -130,6 +131,8 @@ public class LeaderService {
                             && e.getValue().getRebalanceGenerationId() == rebalanceGenerationId)
                     .findAny()
                     .ifPresent(state -> consumerToTaskMap.put(state.getValue().getConsumerId(), state.getKey()));
+            LOGGER.info("New task sync context after merging: {} for consumerTaskMap {}, rebalanceGenerationId {}, consumer task map size {}",
+                    taskSyncContextHolder.get().getAllTaskStates(), consumerToTaskMap, rebalanceGenerationId, consumerToTaskMap.size());
 
             metricsEventPublisher.publishMetricEvent(
                     new RebalanceMetricEvent(consumerToTaskMap.size(), consumers.size()));

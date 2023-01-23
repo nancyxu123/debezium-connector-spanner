@@ -45,7 +45,10 @@ public class SyncEventConsumerFactory<K, V> {
                         ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName(),
                         ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName(),
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                        ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, autoCommitEnabled));
+                        ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, autoCommitEnabled,
+                        ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, "120000",
+                        ConsumerConfig.FETCH_MAX_BYTES_CONFIG, "1000000",
+                        ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, "1000000"));
 
         return new KafkaConsumer<>(props);
     }

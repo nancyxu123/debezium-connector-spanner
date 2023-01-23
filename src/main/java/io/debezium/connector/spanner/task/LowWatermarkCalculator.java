@@ -63,7 +63,7 @@ public class LowWatermarkCalculator {
         Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
         if (!duplicatesInPartitions.isEmpty()) {
             LOGGER.warn(
-                    "calculateLowWatermark: found duplication in partitionsMap: {}", duplicatesInPartitions);
+                    "calculateLowWatermark: found duplication in partitionsMap: {}", duplicatesInPartitions.iterator().next());
             return null;
         }
 
@@ -80,7 +80,7 @@ public class LowWatermarkCalculator {
         if (!duplicatesInSharedPartitions.isEmpty()) {
             LOGGER.warn(
                     "calculateLowWatermark: found duplication in sharedPartitionsMap: {}",
-                    duplicatesInSharedPartitions);
+                    duplicatesInSharedPartitions.iterator().next());
             return null;
         }
 
@@ -151,9 +151,10 @@ public class LowWatermarkCalculator {
                                 long lag = now - partitionState.getStartTimestamp().toDate().getTime();
                                 if (lag > OFFSET_MONITORING_LAG_MAX_MS) {
                                     LOGGER.warn(
-                                            "Partition has a very old start timestamp, lag: {}, token: {}",
+                                            "Partition has a very old start timestamp, lag: {}, token: {}, numTokens: {}",
                                             lag,
-                                            partitionState.getStartTimestamp());
+                                            partitionState,
+                                            allPartitions.values().size());
                                 }
                                 return partitionState.getStartTimestamp();
                             }
@@ -179,7 +180,7 @@ public class LowWatermarkCalculator {
                                 String token = e.getKey();
                                 long lag = now - timestamp.toDate().getTime();
                                 if (lag > OFFSET_MONITORING_LAG_MAX_MS) {
-                                    LOGGER.warn("Partition has a very old offset, lag: {}, token: {}", lag, token);
+                                    LOGGER.warn("Partition has a very old offset, lag: {}, token: {}, numTokens: {}", lag, token, offsets.values().size());
                                 }
                             }
                         });

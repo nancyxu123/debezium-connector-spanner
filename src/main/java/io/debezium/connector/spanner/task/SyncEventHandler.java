@@ -157,7 +157,7 @@ public class SyncEventHandler {
                 return;
             }
 
-            LOGGER.debug("Task {} - process sync event", taskSyncContextHolder.get().getTaskUid());
+            LOGGER.debug("Task {} - process sync event {}", taskSyncContextHolder.get().getTaskUid(), inSync);
 
             taskSyncContextHolder.update(context -> SyncEventMerger.merge(context, inSync));
 
@@ -185,9 +185,14 @@ public class SyncEventHandler {
                 return;
             }
 
-            LOGGER.debug("Task {} - process sync event - rebalance answer", taskSyncContextHolder.get().getTaskUid());
+            LOGGER.info("Task {} - process sync event {} - rebalance answer for rebalance generation ID {}", taskSyncContextHolder.get().getTaskUid(), inSync,
+                    taskSyncContextHolder.get().getRebalanceGenerationId());
 
             taskSyncContextHolder.update(context -> SyncEventMerger.merge(context, inSync));
+
+            LOGGER.info("Task {} - process sync event {} - rebalance answer for rebalance generation ID {}, updated task sync context: {}",
+                    taskSyncContextHolder.get().getTaskUid(), inSync,
+                    taskSyncContextHolder.get().getRebalanceGenerationId(), taskSyncContextHolder.get());
 
         }
         finally {
@@ -201,7 +206,7 @@ public class SyncEventHandler {
             long currentGeneration = taskSyncContextHolder.get().getRebalanceGenerationId();
 
             if (inGeneration < currentGeneration) {
-                LOGGER.debug("skipFromPreviousGeneration: currentGen: {}, inGen: {}, inTaskUid: {}", currentGeneration, inGeneration, inSync.getTaskUid());
+                LOGGER.info("skipFromPreviousGeneration: currentGen: {}, inGen: {}, inTaskUid: {}", currentGeneration, inGeneration, inSync.getTaskUid());
                 return true;
             }
         }

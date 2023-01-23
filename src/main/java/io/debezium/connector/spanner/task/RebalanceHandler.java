@@ -74,8 +74,8 @@ public class RebalanceHandler {
 
         taskSyncPublisher.send(taskSyncEvent);
 
-        LOGGER.info("processRebalancingEvent: Task {} rebalance answer has been sent",
-                taskSyncContextHolder.get().getTaskUid());
+        LOGGER.info("processRebalancingEvent: Task {} rebalance answer has been sent with generation id {}",
+                taskSyncContextHolder.get().getTaskUid(), rebalanceGenerationId);
         if (isLeader) {
             LOGGER.info("Task {} is leader", context.getTaskUid());
             this.leaderAction.start();

@@ -179,8 +179,8 @@ public class LeaderAction {
 
         TaskSyncEvent taskSyncEvent = taskSyncContext.buildTaskSyncEvent(MessageTypeEnum.NEW_EPOCH);
 
-        LOGGER.info("Task {} - LeaderAction sent sync event start new epoch {}:{}", taskSyncContext.getTaskUid(),
-                taskSyncContext.getRebalanceGenerationId(), taskSyncContext.getEpochOffsetHolder().getEpochOffset());
+        LOGGER.info("Task {} - LeaderAction sent sync event start new epoch {}:{}, taskSyncEvent {}", taskSyncContext.getTaskUid(),
+                taskSyncContext.getRebalanceGenerationId(), taskSyncContext.getEpochOffsetHolder().getEpochOffset(), taskSyncEvent.getTaskStates().size());
 
         taskSyncPublisher.send(taskSyncEvent);
 
