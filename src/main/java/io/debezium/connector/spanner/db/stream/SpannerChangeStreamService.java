@@ -61,7 +61,6 @@ public class SpannerChangeStreamService {
             long start = now();
             while (resultSet.next()) {
                 long delay = now() - start;
-
                 List<ChangeStreamEvent> events = changeStreamRecordMapper.toChangeStreamEvents(
                         partition,
                         resultSet, resultSet.getMetadata());
@@ -88,6 +87,7 @@ public class SpannerChangeStreamService {
         }
         finally {
             LOGGER.info("Task {}, Stopped streaming from partition {}", taskUid, token);
+
         }
 
         partitionEventListener.onFinish(partition);

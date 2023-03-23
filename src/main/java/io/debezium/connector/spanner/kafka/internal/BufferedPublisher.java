@@ -25,6 +25,8 @@ import com.google.common.annotations.VisibleForTesting;
 import io.debezium.connector.spanner.kafka.internal.model.PartitionState;
 import io.debezium.connector.spanner.kafka.internal.model.TaskState;
 import io.debezium.connector.spanner.kafka.internal.model.TaskSyncEvent;
+import io.debezium.util.Clock;
+import io.debezium.util.Metronome;
 
 
 /**
@@ -42,9 +44,8 @@ public class BufferedPublisher {
     private final Consumer<TaskSyncEvent> onPublish;
     private final String taskUid;
 
-    private final Duration sleepInterval = Duration.ofMillis(100);
+    private final Duration sleepInterval = Duration.ofMillis(1000);
     private final Clock clock;
-
 
     public BufferedPublisher(String taskUid, String name, long timeout, Predicate<TaskSyncEvent> publishImmediately, Consumer<TaskSyncEvent> onPublish) {
         this.publishImmediately = publishImmediately;
