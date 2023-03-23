@@ -44,7 +44,7 @@ public class BufferedPublisher {
     private final Consumer<TaskSyncEvent> onPublish;
     private final String taskUid;
 
-    private final Duration sleepInterval = Duration.ofMillis(1000);
+    private final Duration sleepInterval = Duration.ofMillis(100);
     private final Clock clock;
 
     public BufferedPublisher(String taskUid, String name, long timeout, Predicate<TaskSyncEvent> publishImmediately, Consumer<TaskSyncEvent> onPublish) {
