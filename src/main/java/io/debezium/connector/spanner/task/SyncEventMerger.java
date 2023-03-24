@@ -52,6 +52,18 @@ public class SyncEventMerger {
         if (newTask.getTaskUid().equals(currentContext.getTaskUid())) {
             return builder.build();
         }
+        boolean originalDuplicates = false;
+
+        Map<String, List<PartitionState>> originalPartitionsMap = currentContext.getAllTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getPartitions().stream())
+                .filter(
+                        partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+        Set<String> originalDuplicatesInPartitions = checkDuplication(originalPartitionsMap);
+        if (!originalDuplicatesInPartitions.isEmpty()) {
+            originalDuplicates = true;
+        }
 
         // We only update our internal copy of the other task's state.
         TaskState currentTask = currentContext.getTaskStates().get(newMessage.getTaskUid());
@@ -139,6 +151,20 @@ public class SyncEventMerger {
             TaskSyncContext result = builder
                     .build();
             LOGGER.info("Processed incremental answer {} to get {}", newMessage, result);
+
+            // Check if there is duplication after merging the message.
+            Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty() && !originalDuplicates) {
+                LOGGER.warn(
+                        "Found duplicate in partitions {}. Processed {} on {} to get {}",
+                        duplicatesInPartitions, newMessage, currentContext, result);
+            }
             return result;
         }
         LOGGER.debug("merge: final state is not changed");
@@ -180,6 +206,20 @@ public class SyncEventMerger {
                     .build();
             LOGGER.info("Processed rebalance answer {} from task {} for rebalance generation id {}", newMessage, newMessage.getTaskUid(),
                     newMessage.getRebalanceGenerationId());
+
+            // Check if there is duplication after merging the message.
+            Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "Found duplicate in partitions {}. Processed {} on {} to get {}",
+                        duplicatesInPartitions, newMessage, currentContext, result);
+            }
             return result;
         }
         LOGGER.debug("merge: final state is not changed");
@@ -234,6 +274,19 @@ public class SyncEventMerger {
             debug(LOGGER, "merge: final state {}, \nUpdated uids: {}, epoch: {}",
                     result, updatedStatesUids, result.getRebalanceGenerationId());
 
+            // Check if there is duplication after merging the message.
+            Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "Found duplicate in partitions {}. Processed {} on {} to get {}",
+                        duplicatesInPartitions, newMessage, currentContext, result);
+            }
             return result;
         }
         LOGGER.debug("merge: final state is not changed");
@@ -257,6 +310,27 @@ public class SyncEventMerger {
                         .toBuilder()
                         .stateTimestamp(newMessage.getMessageTimestamp())
                         .build());
-        return builder.build();
+        TaskSyncContext result = builder.build();
+        // Check if there is duplication after merging the message.
+        Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getPartitions().stream())
+                .filter(
+                        partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+        Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+        if (!duplicatesInPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "Found duplicate in partitions {}. Processed {} on {} to get {}",
+                    duplicatesInPartitions, newMessage, currentContext, result);
+        }
+        return result;
+    }
+
+    private static Set<String> checkDuplication(Map<String, List<PartitionState>> map) {
+        return map.entrySet().stream()
+                .filter(entry -> entry.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

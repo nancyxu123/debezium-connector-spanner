@@ -63,7 +63,8 @@ public class LowWatermarkCalculator {
         Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
         if (!duplicatesInPartitions.isEmpty()) {
             LOGGER.warn(
-                    "calculateLowWatermark: found duplication in partitionsMap: {}", duplicatesInPartitions);
+                    "calculateLowWatermark: found duplication in partitionsMap: {}",
+                    duplicatesInPartitions);
             return null;
         }
 
@@ -160,8 +161,8 @@ public class LowWatermarkCalculator {
         final long currentTime = new Date().getTime();
         long currentLag = currentTime - lowWatermarkTimestamp.toDate().getTime();
         if (currentLag > OFFSET_MONITORING_LAG_MAX_MS) {
-            LOGGER.warn("Very old watermark is being calculated {} with current lag {} all partitions {} and connector start time {} for task sync context {}",
-                    lowWatermarkTimestamp, currentLag, allPartitions, spannerConnectorConfig.startTime(), taskSyncContextHolder.get());
+            LOGGER.warn("Very old watermark is being calculated {} with current lag {} and connector start time {}",
+                    lowWatermarkTimestamp, currentLag, spannerConnectorConfig.startTime());
         }
         return lowWatermarkTimestamp;
     }

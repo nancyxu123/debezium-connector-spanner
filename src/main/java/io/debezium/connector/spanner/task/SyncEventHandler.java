@@ -186,6 +186,7 @@ public class SyncEventHandler {
                 processNewEpoch(inSync, metadata);
             }
         }
+
         catch (Exception e) {
             LOGGER.error("Exception during processing task message {}, {}", inSync, e);
         }
