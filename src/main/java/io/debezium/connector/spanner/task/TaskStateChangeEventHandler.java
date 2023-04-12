@@ -161,7 +161,6 @@ public class TaskStateChangeEventHandler {
         List<String> sharedPartitions = new ArrayList<String>();
         List<String> removedOwnedPartitions = new ArrayList<String>();
         List<String> removedSharedPartitions = new ArrayList<String>();
-        List<String> modifiedOwnedPartitions = new ArrayList<String>();
 
         try {
             taskSyncContext = taskSyncContextHolder.updateAndGet(context -> {
@@ -177,14 +176,6 @@ public class TaskStateChangeEventHandler {
                         for (String updatedOwnedPartition : operation.updatedOwnedPartitions()) {
                             if (!ownedPartitions.contains(updatedOwnedPartition)) {
                                 ownedPartitions.add(updatedOwnedPartition);
-                            }
-                        }
-                    }
-
-                    if (!operation.modifiedOwnedPartitions().isEmpty()) {
-                        for (String modifiedOwnedPartition : operation.modifiedOwnedPartitions()) {
-                            if (!modifiedOwnedPartitions.contains(modifiedOwnedPartition)) {
-                                modifiedOwnedPartitions.add(modifiedOwnedPartition);
                             }
                         }
                     }
@@ -223,8 +214,7 @@ public class TaskStateChangeEventHandler {
         if (publishTaskSyncEvent.get()) {
             LOGGER.info("Task {} - send sync event", taskSyncContext.getTaskUid());
             taskSyncPublisher.send(taskSyncContext.buildIncrementalTaskSyncEvent(
-                    ownedPartitions, sharedPartitions, removedOwnedPartitions, removedSharedPartitions,
-                    modifiedOwnedPartitions));
+                    ownedPartitions, sharedPartitions, removedOwnedPartitions, removedSharedPartitions));
         }
 
         return taskSyncContext;

@@ -84,9 +84,4 @@ public class ClearSharedPartitionOperation implements Operation {
     public List<String> removedSharedPartitions() {
         return removedSharedTokens;
     }
-
-    @Override
-    public List<String> modifiedOwnedPartitions() {
-        return Collections.emptyList();
-    }
 }

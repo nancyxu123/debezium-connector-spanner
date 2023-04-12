@@ -27,7 +27,5 @@ public interface Operation {
 
     List<String> removedSharedPartitions();
 
-    List<String> modifiedOwnedPartitions();
-
     TaskSyncContext doOperation(TaskSyncContext taskSyncContext);
 }

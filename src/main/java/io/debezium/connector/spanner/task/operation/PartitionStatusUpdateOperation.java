@@ -69,7 +69,7 @@ public class PartitionStatusUpdateOperation implements Operation {
 
     @Override
     public List<String> updatedOwnedPartitions() {
-        return Collections.emptyList();
+        return Collections.singletonList(token);
     }
 
     @Override
@@ -85,10 +85,5 @@ public class PartitionStatusUpdateOperation implements Operation {
     @Override
     public List<String> removedSharedPartitions() {
         return Collections.emptyList();
-    }
-
-    @Override
-    public List<String> modifiedOwnedPartitions() {
-        return Collections.singletonList(token);
     }
 }

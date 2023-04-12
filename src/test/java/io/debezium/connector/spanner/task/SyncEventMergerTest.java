@@ -75,13 +75,12 @@ class SyncEventMergerTest {
         List<String> updatedSharedPartitions = new ArrayList<>();
         List<String> removedOwnedPartitions = new ArrayList<>();
         List<String> removedSharedPartitions = new ArrayList<>();
-        List<String> modifiedOwnedPartitions = new ArrayList<>();
-        modifiedOwnedPartitions.add("token2");
+        updatedOwnedPartitions.add("token2");
         removedSharedPartitions.add("token5");
 
         TaskSyncEvent syncEvent = taskSyncContext1.buildIncrementalTaskSyncEvent(
                 updatedOwnedPartitions, updatedSharedPartitions, removedOwnedPartitions,
-                removedSharedPartitions, modifiedOwnedPartitions);
+                removedSharedPartitions);
         TaskSyncContext mergedIncrementalTaskSyncEvent = mergeIncrementalTaskSyncEvent(
                 taskSyncContext2, syncEvent);
 

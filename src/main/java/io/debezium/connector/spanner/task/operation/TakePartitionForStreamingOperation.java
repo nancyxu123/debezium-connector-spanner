@@ -140,7 +140,7 @@ public class TakePartitionForStreamingOperation implements Operation {
 
     @Override
     public List<String> updatedOwnedPartitions() {
-        return Collections.emptyList();
+        return tokensScheduled;
     }
 
     @Override
@@ -156,11 +156,6 @@ public class TakePartitionForStreamingOperation implements Operation {
     @Override
     public List<String> removedSharedPartitions() {
         return Collections.emptyList();
-    }
-
-    @Override
-    public List<String> modifiedOwnedPartitions() {
-        return tokensScheduled;
     }
 
 }

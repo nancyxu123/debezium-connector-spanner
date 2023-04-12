@@ -9,7 +9,7 @@ import static io.debezium.connector.spanner.task.LoggerUtils.debug;
 import static java.util.stream.Collectors.toUnmodifiableMap;
 import static org.slf4j.LoggerFactory.getLogger;
 
-import java.util.ArrayList;
+import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -41,109 +41,82 @@ public class SyncEventMerger {
         Map<String, TaskState> newTaskStatesMap = newMessage.getTaskStates();
         debug(LOGGER, "merge: state before {}, \nIncoming states: {}", currentContext, newTaskStatesMap);
 
+        // Get the current context.
         var builder = currentContext.toBuilder();
 
+        // Retrieve the new task from the incremental message.
         TaskState newTask = newMessage.getTaskStates().get(newMessage.getTaskUid());
         if (newTask == null) {
             LOGGER.warn("The incremental message {} did not contain the task's UID: {}", newMessage, newMessage.getTaskUid());
             return builder.build();
         }
 
+        // We don't want to reprocess the current task's incremental message.
         if (newTask.getTaskUid().equals(currentContext.getTaskUid())) {
             return builder.build();
-        }
-        boolean originalDuplicates = false;
-
-        Map<String, List<PartitionState>> originalPartitionsMap = currentContext.getAllTaskStates().values().stream()
-                .flatMap(taskState -> taskState.getPartitions().stream())
-                .filter(
-                        partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
-                                && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                .collect(Collectors.groupingBy(PartitionState::getToken));
-        Set<String> originalDuplicatesInPartitions = checkDuplication(originalPartitionsMap);
-        if (!originalDuplicatesInPartitions.isEmpty()) {
-            originalDuplicates = true;
         }
 
         // We only update our internal copy of the other task's state.
         TaskState currentTask = currentContext.getTaskStates().get(newMessage.getTaskUid());
-        // We only update our internal copy of another task's state, if the state timestamp
-        // in the sync event message is greater than the state timestamp of our internal
-        // copy of the other task's state.
 
         if (currentTask == null) {
+            // If the in-memory task sync event does not contain the other task, we insert
+            // the new task into the task states map.
             Map<String, TaskState> currentTaskStates = new HashMap<>(currentContext.getTaskStates());
             currentTaskStates.put(newMessage.getTaskUid(), newTask);
             builder.taskStates(currentTaskStates)
                     .createdTimestamp(Long.max(currentContext.getCreatedTimestamp(),
                             newMessage.getMessageTimestamp()));
             TaskSyncContext result = builder.build();
-            LOGGER.debug("Processed incremental answer {} from task {} for " +
-                    "rebalance generation id {}", newMessage, newMessage.getTaskUid(),
-                    newMessage.getRebalanceGenerationId());
             LOGGER.info("Processed incremental answer {} to get {}", newMessage, result);
             return result;
         }
         else if (newTask.getStateTimestamp() > currentTask.getStateTimestamp()) {
-
-            // Remove the new message's task state from our current task state.
+            // Remove the task state from our map.
             Map<String, TaskState> currentTaskStates = new HashMap<>(currentContext.getTaskStates());
             currentTaskStates.remove(newMessage.getTaskUid());
 
-            // Get the updated owned partitions, newly removed owned partitions, newly shared partitions,
-            // newly removed shared partitions from the sync event message.
-            List<PartitionState> updatedOwnedPartitions = newTask.getPartitions().stream()
-                    .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+            // Retrieve the updated partitions from the new task.
+            List<PartitionState> newTaskPartitions = newTask.getPartitions().stream()
                     .collect(Collectors.toList());
-            List<String> updatedOwnedPartitionTokens = newTask.getPartitions().stream()
-                    .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                    .map(partitionState -> partitionState.getToken())
-                    .collect(Collectors.toList());
-            List<String> removedOwnedPartitionTokens = newTask.getPartitions().stream()
-                    .filter(partitionState -> partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                    .map(partitionState -> partitionState.getToken())
-                    .collect(Collectors.toList());
-            List<PartitionState> newSharedPartitions = newTask.getSharedPartitions().stream()
-                    .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                    .collect(Collectors.toList());
-            List<String> newSharedPartitionTokens = newTask.getSharedPartitions().stream()
-                    .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                    .map(partitionState -> partitionState.getToken())
-                    .collect(Collectors.toList());
-            List<String> removedSharedPartitionTokens = newTask.getSharedPartitions().stream()
-                    .filter(partitionState -> partitionState.getState().equals(PartitionStateEnum.REMOVED))
+            List<String> newTaskPartitionTokens = newTask.getPartitions().stream()
                     .map(partitionState -> partitionState.getToken())
                     .collect(Collectors.toList());
 
-            // Compute the final owned partitions for this task.
-            List<PartitionState> finalOwnedPartitions = new ArrayList<>();
-            for (PartitionState currentPartition : currentTask.getPartitions()) {
-                // Only add the partitions from the current task sync context, if it was not newly
-                // modified or removed.
-                if (!removedOwnedPartitionTokens.contains(currentPartition.getToken()) &&
-                        !updatedOwnedPartitionTokens.contains(currentPartition.getToken())) {
-                    finalOwnedPartitions.add(currentPartition);
-                }
-            }
-            // Add all the newly modified partitions.
-            finalOwnedPartitions.addAll(updatedOwnedPartitions);
+            // Retrieve the updated shared partitions from the new task.
+            List<PartitionState> newTaskSharedPartitions = newTask.getSharedPartitions().stream()
+                    .collect(Collectors.toList());
+            List<String> newTaskSharedPartitionTokens = newTask.getSharedPartitions().stream()
+                    .map(partitionState -> partitionState.getToken())
+                    .collect(Collectors.toList());
 
-            // Compute the final shared partitions.
-            List<PartitionState> finalSharedPartitions = new ArrayList<>();
-            for (PartitionState currentPartition : currentTask.getSharedPartitions()) {
-                // Only add the partitions from the current task sync context, if it was not newly
-                // shared or removed.
-                if (!removedSharedPartitionTokens.contains(currentPartition.getToken()) &&
-                        !newSharedPartitionTokens.contains(currentPartition.getToken())) {
-                    finalSharedPartitions.add(currentPartition);
-                }
-            }
-            // Add all the newly shared partitions.
-            finalSharedPartitions.addAll(newSharedPartitions);
+            // Get a list of partition tokens that the old message contained that the new message
+            // didn't.
+            List<PartitionState> previouslyOwnedPartitions = currentTask.getPartitions().stream()
+                    .filter(partitionState -> !newTaskPartitionTokens.contains(
+                            partitionState.getToken()))
+                    .collect(Collectors.toList());
+
+            // Get a list of shared partition tokens that the old message contained that the
+            // new message didn't
+            List<PartitionState> previouslySharedPartitions = currentTask.getSharedPartitions().stream()
+                    .filter(partitionState -> !newTaskSharedPartitionTokens.contains(
+                            partitionState.getToken()))
+                    .collect(Collectors.toList());
+
+            // Merge the current + new partition tokens and filter out tokens that are REMOVED.
+            List<PartitionState> mergedOwnedPartitions = newTask.getPartitions().stream()
+                    .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.toList());
+            mergedOwnedPartitions.addAll(previouslyOwnedPartitions);
+            List<PartitionState> mergedSharedPartitions = newTask.getSharedPartitions().stream()
+                    .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.toList());
+            mergedSharedPartitions.addAll(previouslySharedPartitions);
 
             // build from the new sync context.
-            TaskState finalTaskState = newTask.toBuilder().partitions(finalOwnedPartitions)
-                    .sharedPartitions(finalSharedPartitions).build();
+            TaskState finalTaskState = newTask.toBuilder().partitions(mergedOwnedPartitions)
+                    .sharedPartitions(mergedSharedPartitions).build();
             currentTaskStates.put(newMessage.getTaskUid(), finalTaskState);
             builder.taskStates(currentTaskStates)
                     .createdTimestamp(Long.max(currentContext.getCreatedTimestamp(),
@@ -151,20 +124,7 @@ public class SyncEventMerger {
             TaskSyncContext result = builder
                     .build();
             LOGGER.info("Processed incremental answer {} ", newMessage);
-
-            // Check if there is duplication after merging the message.
-            Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
-                    .flatMap(taskState -> taskState.getPartitions().stream())
-                    .filter(
-                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
-                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                    .collect(Collectors.groupingBy(PartitionState::getToken));
-            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
-            if (!duplicatesInPartitions.isEmpty() && !originalDuplicates) {
-                LOGGER.warn(
-                        "Found duplicate in partitions {}: {}",
-                        duplicatesInPartitions, result);
-            }
+            checkDuplicationInTaskSyncEvent(result);
             return result;
         }
         LOGGER.debug("merge: final state is not changed");
@@ -192,12 +152,11 @@ public class SyncEventMerger {
         // We only retrieve the task state belonging to the rebalance answer.
         TaskState currentTask = currentContext.getTaskStates().get(newMessage.getTaskUid());
 
-        // We only update our internal copy of another task's state, if the state timestamp
-        // in the sync event message is greater than the state timestamp of our internal
-        // copy of the other task's state.
         if (currentTask == null || newTask.getStateTimestamp() > currentTask.getStateTimestamp()) {
             Map<String, TaskState> taskStates = new HashMap<>(currentContext.getTaskStates());
+            // Remove the task state from the map.
             taskStates.remove(newMessage.getTaskUid());
+            // Insert the new task state in.
             taskStates.put(newMessage.getTaskUid(), newTask);
             builder.taskStates(taskStates)
                     .createdTimestamp(Long.max(currentContext.getCreatedTimestamp(),
@@ -206,20 +165,7 @@ public class SyncEventMerger {
                     .build();
             LOGGER.info("Processed rebalance answer {} from task {} for rebalance generation id {}", newMessage, newMessage.getTaskUid(),
                     newMessage.getRebalanceGenerationId());
-
-            // Check if there is duplication after merging the message.
-            Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
-                    .flatMap(taskState -> taskState.getPartitions().stream())
-                    .filter(
-                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
-                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                    .collect(Collectors.groupingBy(PartitionState::getToken));
-            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
-            if (!duplicatesInPartitions.isEmpty()) {
-                LOGGER.warn(
-                        "Found duplicate in partitions {}: {}",
-                        duplicatesInPartitions, result);
-            }
+            checkDuplicationInTaskSyncEvent(result);
             return result;
         }
         LOGGER.debug("merge: final state is not changed");
@@ -241,7 +187,7 @@ public class SyncEventMerger {
         // We do not update our own internal task state from received sync event messages, since
         // we have the most up-to-date version of our own task state.
         for (TaskState newTaskState : newTaskStatesMap.values()) {
-
+            // We don't update our own task state.
             if (newTaskState.getTaskUid().equals(currentContext.getTaskUid())) {
                 continue;
             }
@@ -273,20 +219,9 @@ public class SyncEventMerger {
 
             debug(LOGGER, "merge: final state {}, \nUpdated uids: {}, epoch: {}",
                     result, updatedStatesUids, result.getRebalanceGenerationId());
+            checkDuplicationInTaskSyncEvent(result);
 
             // Check if there is duplication after merging the message.
-            Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
-                    .flatMap(taskState -> taskState.getPartitions().stream())
-                    .filter(
-                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
-                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
-                    .collect(Collectors.groupingBy(PartitionState::getToken));
-            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
-            if (!duplicatesInPartitions.isEmpty()) {
-                LOGGER.warn(
-                        "Found duplicate in partitions {}: {}",
-                        duplicatesInPartitions, result);
-            }
             return result;
         }
         LOGGER.debug("merge: final state is not changed");
@@ -299,6 +234,7 @@ public class SyncEventMerger {
         var builder = currentContext.toBuilder();
         Map<String, TaskState> newTaskStates = new HashMap<>(newMessage.getTaskStates());
         newTaskStates.remove(currentContext.getTaskUid());
+
         // When we receive NEW_EPOCH messages, we clear all task states belonging to tasks
         // other than the current task state, and replace them with entries from the
         // NEW_EPOCH message.
@@ -311,20 +247,40 @@ public class SyncEventMerger {
                         .stateTimestamp(newMessage.getMessageTimestamp())
                         .build());
         TaskSyncContext result = builder.build();
-        // Check if there is duplication after merging the message.
-        Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
+        checkDuplicationInTaskSyncEvent(result);
+        return result;
+    }
+
+    private static void checkDuplicationInTaskSyncEvent(TaskSyncContext taskSyncContext) {
+        Map<String, List<PartitionState>> partitionsMap = taskSyncContext.getAllTaskStates().values().stream()
                 .flatMap(taskState -> taskState.getPartitions().stream())
                 .filter(
                         partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
                                 && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
                 .collect(Collectors.groupingBy(PartitionState::getToken));
+
         Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
         if (!duplicatesInPartitions.isEmpty()) {
             LOGGER.warn(
-                    "Found duplicate in partitions {}:{}",
-                    duplicatesInPartitions, result);
+                    "SyncEventMerger: found duplication in partitionsMap: {}",
+                    duplicatesInPartitions);
         }
-        return result;
+
+        Map<String, PartitionState> partitions = partitionsMap.entrySet().stream()
+                .map(entry -> new AbstractMap.SimpleEntry<>(entry.getKey(), entry.getValue().get(0)))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncContext.getAllTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                .filter(partitionState -> !partitions.containsKey(partitionState.getToken()))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+
+        Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+        if (!duplicatesInSharedPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "SyncEventMerger: found duplication in sharedPartitionsMap: {}",
+                    duplicatesInSharedPartitions);
+        }
     }
 
     private static Set<String> checkDuplication(Map<String, List<PartitionState>> map) {

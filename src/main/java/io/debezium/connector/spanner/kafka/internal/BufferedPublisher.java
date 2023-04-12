@@ -9,9 +9,11 @@ import static org.slf4j.LoggerFactory.getLogger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -19,15 +21,14 @@ import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 
-import io.debezium.util.Clock;
-import io.debezium.util.Metronome;
 import com.google.common.annotations.VisibleForTesting;
+
 import io.debezium.connector.spanner.kafka.internal.model.PartitionState;
+import io.debezium.connector.spanner.kafka.internal.model.PartitionStateEnum;
 import io.debezium.connector.spanner.kafka.internal.model.TaskState;
 import io.debezium.connector.spanner.kafka.internal.model.TaskSyncEvent;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
-
 
 /**
  * This class allows to publish the latest buffered value
@@ -96,14 +97,16 @@ public class BufferedPublisher {
         TaskState toMergeTask = toMerge.getTaskStates().get(task);
 
         if (toMergeTask == null) {
+            LOGGER.warn("TaskSyncEvent does not contain the task uid {}, {}", task, toMerge);
             if (existing == null) {
                 return null;
             }
-            LOGGER.warn("TaskSyncEvent does not contain the task uid {}, {}", task, toMerge);
+            // Since there is nothing to merge, we should just return the existing TaskSyncEvent.
             return existing;
         }
 
         if (existing == null) {
+            // If there is no existing value, we should just return the new task sync event.
             LOGGER.info("Buffered existing value: {}", toMerge);
             return toMerge;
         }
@@ -128,6 +131,7 @@ public class BufferedPublisher {
                 .filter(partitionState -> !newlyOwnedPartitions.contains(
                         partitionState.getToken()))
                 .collect(Collectors.toList());
+
         // Get a list of shared partition tokens that the old message contained that the
         // new message didn't
         List<PartitionState> previouslySharedPartitions = existingTask.getSharedPartitions().stream()
@@ -141,7 +145,6 @@ public class BufferedPublisher {
         finalOwnedPartitions.addAll(previouslyOwnedPartitions);
         List<PartitionState> finalSharedPartitions = toMergeTask.getSharedPartitions().stream()
                 .collect(Collectors.toList());
-
         finalSharedPartitions.addAll(previouslySharedPartitions);
 
         // Put the total list of shared + modified tokens into the final task state.
@@ -154,6 +157,9 @@ public class BufferedPublisher {
         taskStates.put(task, finalTaskState);
         TaskSyncEvent mergedSyncEvent = toMerge.toBuilder().taskStates(taskStates).build();
         LOGGER.info("Buffered merged value: {} with toMerge {} and existing {}", mergedSyncEvent, toMerge, existing);
+
+        checkDuplicationInTaskSyncEvent(mergedSyncEvent);
+
         return mergedSyncEvent;
     }
 
@@ -193,5 +199,44 @@ public class BufferedPublisher {
                 "Stopped BufferedPublisher for Task Uid {}",
                 this.taskUid,
                 (this.value.get() == null));
+    }
+
+    private static void checkDuplicationInTaskSyncEvent(TaskSyncEvent taskSyncEvent) {
+        Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getPartitions().stream())
+                .filter(
+                        partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+
+        Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+        if (!duplicatesInPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "BufferedPublisher: found duplication in partitionsMap: {}",
+                    duplicatesInPartitions);
+        }
+
+        Map<String, PartitionState> partitions = partitionsMap.entrySet().stream()
+                .map(entry -> new AbstractMap.SimpleEntry<>(entry.getKey(), entry.getValue().get(0)))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                .filter(partitionState -> !partitions.containsKey(partitionState.getToken()))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+
+        Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+        if (!duplicatesInSharedPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "BufferedPublisher: found duplication in sharedPartitionsMap: {}",
+                    duplicatesInSharedPartitions);
+        }
+    }
+
+    private static Set<String> checkDuplication(Map<String, List<PartitionState>> map) {
+        return map.entrySet().stream()
+                .filter(entry -> entry.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

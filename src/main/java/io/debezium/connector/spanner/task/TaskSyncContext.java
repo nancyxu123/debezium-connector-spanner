@@ -9,10 +9,12 @@ import static java.util.Collections.emptyList;
 import static org.slf4j.LoggerFactory.getLogger;
 
 import java.time.Instant;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -73,19 +75,21 @@ public class TaskSyncContext {
     public Map<String, TaskState> getIncrementalTaskStateMap(List<String> updatedOwnedPartitions,
                                                              List<String> updatedSharedPartitions,
                                                              List<String> removedOwnedPartitions,
-                                                             List<String> removedSharedPartitions,
-                                                             List<String> modifiedOwnedPartitions) {
-        // Remove all owned partitions that were also modified.
-        updatedOwnedPartitions.removeAll(modifiedOwnedPartitions);
-        // Remove all owned / modified patiitons that were removed
-        updatedOwnedPartitions.removeAll(removedOwnedPartitions);
-        modifiedOwnedPartitions.removeAll(removedOwnedPartitions);
+                                                             List<String> removedSharedPartitions) {
 
-        // Remove all shared partitions that were removed.
-        updatedSharedPartitions.removeAll(removedSharedPartitions);
+        List<String> ownedPartitions = new ArrayList<String>();
+        List<String> sharedPartitions = new ArrayList<String>();
+
+        ownedPartitions.addAll(updatedOwnedPartitions);
+        sharedPartitions.addAll(updatedSharedPartitions);
+
+        // Remove all owned / modified patiitons that were removed
+        ownedPartitions.removeAll(removedOwnedPartitions);
+        sharedPartitions.removeAll(removedSharedPartitions);
+
         // Add all partitions that are newly owned by this task.
         List<PartitionState> newOwnedPartitions = currentTaskState.getPartitions().stream()
-                .filter(partitionState -> updatedOwnedPartitions.contains(
+                .filter(partitionState -> ownedPartitions.contains(
                         partitionState.getToken()))
                 .collect(Collectors.toList());
         // Add all partitions that are owned but newly removed by this task.
@@ -93,20 +97,15 @@ public class TaskSyncContext {
                 .map(partitionToken -> PartitionState.builder().token(partitionToken)
                         .state(PartitionStateEnum.REMOVED).build())
                 .collect(Collectors.toList());
-        // Add all partitions that had their state modified.
-        List<PartitionState> newModifiedOwnedPartitions = currentTaskState.getPartitions().stream()
-                .filter(partitionState -> modifiedOwnedPartitions.contains(
-                        partitionState.getToken()))
-                .collect(Collectors.toList());
+
         List<PartitionState> ownedPartitionsToAdd = new ArrayList<PartitionState>();
         ownedPartitionsToAdd.addAll(newOwnedPartitions);
         ownedPartitionsToAdd.addAll(newRemovedOwnedPartitions);
-        ownedPartitionsToAdd.addAll(newModifiedOwnedPartitions);
         LOGGER.info("Final list of owned partitions to add: {}", ownedPartitionsToAdd);
 
         // Add all partitions that are newly shared by this task.
         List<PartitionState> newSharedPartitions = currentTaskState.getSharedPartitions().stream()
-                .filter(partitionState -> updatedSharedPartitions.contains(
+                .filter(partitionState -> sharedPartitions.contains(
                         partitionState.getToken()))
                 .collect(Collectors.toList());
         // Add all partitions that were shared by this task but were removed.
@@ -114,6 +113,7 @@ public class TaskSyncContext {
                 .map(partitionToken -> PartitionState.builder().token(partitionToken)
                         .state(PartitionStateEnum.REMOVED).build())
                 .collect(Collectors.toList());
+
         List<PartitionState> sharedPartitionsToAdd = new ArrayList<PartitionState>();
         sharedPartitionsToAdd.addAll(newSharedPartitions);
         sharedPartitionsToAdd.addAll(newRemovedSharedPartitions);
@@ -133,16 +133,15 @@ public class TaskSyncContext {
                                                        List<String> updatedOwnedPartitions,
                                                        List<String> updatedSharedPartitions,
                                                        List<String> removedOwnedPartitions,
-                                                       List<String> removedSharedPartitions,
-                                                       List<String> modifiedOwnedPartitions) {
+                                                       List<String> removedSharedPartitions) {
 
         // This task sync context will only contain partitions that were either newly owned or
         // newly removed by this task, as well as partitions that were newly shared or
         // newly removed by this task.
-        return TaskSyncEvent.builder().epochOffset(this.epochOffsetHolder.getEpochOffset()).taskStates(
+        TaskSyncEvent result = TaskSyncEvent.builder().epochOffset(this.epochOffsetHolder.getEpochOffset()).taskStates(
                 this.getIncrementalTaskStateMap(
                         updatedOwnedPartitions, updatedSharedPartitions, removedOwnedPartitions,
-                        removedSharedPartitions, modifiedOwnedPartitions))
+                        removedSharedPartitions))
                 .taskUid(this.getTaskUid())
                 .consumerId(this.getConsumerId())
                 .rebalanceGenerationId(this.getRebalanceGenerationId())
@@ -150,6 +149,8 @@ public class TaskSyncContext {
                 .messageType(MessageTypeEnum.REGULAR)
                 .databaseSchemaTimestamp(databaseSchemaTimestamp)
                 .build();
+        checkDuplicationInTaskSyncEvent(result);
+        return result;
     }
 
     // Builds a new epoch message, which will contain all task states.
@@ -488,5 +489,44 @@ public class TaskSyncContext {
                 ", createdTimestamp=" + this.getCreatedTimestamp() +
                 ", taskStates=" + this.getTaskStates() +
                 ", currentTaskState=" + this.getCurrentTaskState() + ")";
+    }
+
+    private void checkDuplicationInTaskSyncEvent(TaskSyncEvent taskSyncContext) {
+        Map<String, List<PartitionState>> partitionsMap = taskSyncContext.getTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getPartitions().stream())
+                .filter(
+                        partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+
+        Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+        if (!duplicatesInPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "TaskSyncContext: found duplication in partitionsMap: {}",
+                    duplicatesInPartitions);
+        }
+
+        Map<String, PartitionState> partitions = partitionsMap.entrySet().stream()
+                .map(entry -> new AbstractMap.SimpleEntry<>(entry.getKey(), entry.getValue().get(0)))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncContext.getTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                .filter(partitionState -> !partitions.containsKey(partitionState.getToken()))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+
+        Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+        if (!duplicatesInSharedPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "TaskSyncContext: found duplication in sharedPartitionsMap: {}",
+                    duplicatesInSharedPartitions);
+        }
+    }
+
+    private Set<String> checkDuplication(Map<String, List<PartitionState>> map) {
+        return map.entrySet().stream()
+                .filter(entry -> entry.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

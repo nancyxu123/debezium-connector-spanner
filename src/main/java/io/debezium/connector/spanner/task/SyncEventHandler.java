@@ -108,7 +108,6 @@ public class SyncEventHandler {
         try {
 
             if (!taskSyncContextHolder.get().getRebalanceState().equals(RebalanceState.NEW_EPOCH_STARTED)) {
-                // We skip all messages that are not UPDATE_EPOCH here.
                 return;
             }
 

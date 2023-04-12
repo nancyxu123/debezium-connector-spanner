@@ -37,7 +37,6 @@ class ChildPartitionOperationTest {
         taskSyncContext = operation1.doOperation(taskSyncContext);
         Assertions.assertEquals(operation1.updatedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation1.updatedSharedPartitions().size(), 2);
-        Assertions.assertEquals(operation1.modifiedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation1.removedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation1.removedSharedPartitions().size(), 0);
 
@@ -49,7 +48,6 @@ class ChildPartitionOperationTest {
         taskSyncContext = operation2.doOperation(taskSyncContext);
         Assertions.assertEquals(operation2.updatedOwnedPartitions().size(), 1);
         Assertions.assertEquals(operation2.updatedSharedPartitions().size(), 0);
-        Assertions.assertEquals(operation2.modifiedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation2.removedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation2.removedSharedPartitions().size(), 0);
 
@@ -67,7 +65,6 @@ class ChildPartitionOperationTest {
 
         Assertions.assertEquals(operation.updatedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation.updatedSharedPartitions().size(), 0);
-        Assertions.assertEquals(operation.modifiedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation.removedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation.removedSharedPartitions().size(), 0);
 
@@ -86,7 +83,6 @@ class ChildPartitionOperationTest {
 
         Assertions.assertEquals(operation.updatedOwnedPartitions().size(), 1);
         Assertions.assertEquals(operation.updatedSharedPartitions().size(), 0);
-        Assertions.assertEquals(operation.modifiedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation.removedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation.removedSharedPartitions().size(), 0);
 
@@ -105,7 +101,6 @@ class ChildPartitionOperationTest {
 
         Assertions.assertEquals(operation.updatedOwnedPartitions().size(), 1);
         Assertions.assertEquals(operation.updatedSharedPartitions().size(), 0);
-        Assertions.assertEquals(operation.modifiedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation.removedOwnedPartitions().size(), 0);
         Assertions.assertEquals(operation.removedSharedPartitions().size(), 0);
         Assertions.assertEquals(1, taskSyncContext.getCurrentTaskState().getPartitions().size());

@@ -87,7 +87,6 @@ public class SpannerChangeStreamService {
         }
         finally {
             LOGGER.info("Task {}, Stopped streaming from partition {}", taskUid, token);
-
         }
 
         partitionEventListener.onFinish(partition);
