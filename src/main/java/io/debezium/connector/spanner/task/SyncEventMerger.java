@@ -150,7 +150,7 @@ public class SyncEventMerger {
                             newMessage.getMessageTimestamp()));
             TaskSyncContext result = builder
                     .build();
-            LOGGER.info("Processed incremental answer {} to get {}", newMessage, result);
+            LOGGER.info("Processed incremental answer {} ", newMessage);
 
             // Check if there is duplication after merging the message.
             Map<String, List<PartitionState>> partitionsMap = result.getAllTaskStates().values().stream()
@@ -162,8 +162,8 @@ public class SyncEventMerger {
             Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
             if (!duplicatesInPartitions.isEmpty() && !originalDuplicates) {
                 LOGGER.warn(
-                        "Found duplicate in partitions {}. Processed {} on {} to get {}",
-                        duplicatesInPartitions, newMessage, currentContext, result);
+                        "Found duplicate in partitions {}: {}",
+                        duplicatesInPartitions, result);
             }
             return result;
         }
@@ -217,8 +217,8 @@ public class SyncEventMerger {
             Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
             if (!duplicatesInPartitions.isEmpty()) {
                 LOGGER.warn(
-                        "Found duplicate in partitions {}. Processed {} on {} to get {}",
-                        duplicatesInPartitions, newMessage, currentContext, result);
+                        "Found duplicate in partitions {}: {}",
+                        duplicatesInPartitions, result);
             }
             return result;
         }
@@ -284,8 +284,8 @@ public class SyncEventMerger {
             Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
             if (!duplicatesInPartitions.isEmpty()) {
                 LOGGER.warn(
-                        "Found duplicate in partitions {}. Processed {} on {} to get {}",
-                        duplicatesInPartitions, newMessage, currentContext, result);
+                        "Found duplicate in partitions {}: {}",
+                        duplicatesInPartitions, result);
             }
             return result;
         }
@@ -321,8 +321,8 @@ public class SyncEventMerger {
         Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
         if (!duplicatesInPartitions.isEmpty()) {
             LOGGER.warn(
-                    "Found duplicate in partitions {}. Processed {} on {} to get {}",
-                    duplicatesInPartitions, newMessage, currentContext, result);
+                    "Found duplicate in partitions {}:{}",
+                    duplicatesInPartitions, result);
         }
         return result;
     }

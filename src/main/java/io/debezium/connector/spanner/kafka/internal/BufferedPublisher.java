@@ -38,7 +38,7 @@ public class BufferedPublisher {
 
     private static final Logger LOGGER = getLogger(BufferedPublisher.class);
 
-    private final Thread thread;
+    private volatile Thread thread;
     private final AtomicReference<TaskSyncEvent> value = new AtomicReference<TaskSyncEvent>();
     private final Predicate<TaskSyncEvent> publishImmediately;
     private final Consumer<TaskSyncEvent> onPublish;
