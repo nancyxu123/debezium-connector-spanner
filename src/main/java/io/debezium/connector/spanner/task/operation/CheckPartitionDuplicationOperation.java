@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.spanner.task.operation;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -52,6 +53,7 @@ public class CheckPartitionDuplicationOperation implements Operation {
 
     @Override
     public TaskSyncContext doOperation(TaskSyncContext taskSyncContext) {
+        Instant begin = Instant.now();
 
         for (PartitionState partitionState : taskSyncContext.getCurrentTaskState().getPartitions()) {
 
@@ -63,17 +65,26 @@ public class CheckPartitionDuplicationOperation implements Operation {
                 continue;
             }
 
+            Instant getTasks = Instant.now();
             this.isRequiredPublishSyncEvent = needToStopStreaming(taskSyncContext.getTaskUid(), taskUidPartitionState);
 
+            Instant needStopStreaming = Instant.now();
             if (isRequiredPublishSyncEvent) {
                 taskSyncContext = stopStreaming(taskSyncContext, partitionState);
                 partitionsToStopStreaming.add(partitionState.getToken());
-                LOGGER.debug("Stop streaming the partition: {}", token);
+                LOGGER.info("Stop streaming the partition: {}", token);
             }
             else {
                 LOGGER.warn("Continue streaming the partition: {}", token);
             }
         }
+        Instant end = Instant.now();
+
+        LOGGER.warn(
+                "With task {}, Time for CheckPartitionDuplication to check all partition {}, with {} current partitions ",
+                taskSyncContext.getTaskUid(),
+                end.toEpochMilli() - begin.toEpochMilli(),
+                taskSyncContext.getCurrentTaskState().getPartitions().size());
 
         return taskSyncContext;
     }

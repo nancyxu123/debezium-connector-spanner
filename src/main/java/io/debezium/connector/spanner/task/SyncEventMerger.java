@@ -9,6 +9,7 @@ import static io.debezium.connector.spanner.task.LoggerUtils.debug;
 import static java.util.stream.Collectors.toUnmodifiableMap;
 import static org.slf4j.LoggerFactory.getLogger;
 
+import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -67,11 +68,10 @@ public class SyncEventMerger {
             builder.taskStates(currentTaskStates)
                     .createdTimestamp(Long.max(currentContext.getCreatedTimestamp(),
                             newMessage.getMessageTimestamp()));
-            TaskSyncContext result = builder.build();
-            LOGGER.info("Processed incremental answer {} to get {}", newMessage, result);
-            return result;
+            // LOGGER.info("Processed incremental answer {} to get {}", newMessage, result);
         }
         else if (newTask.getStateTimestamp() > currentTask.getStateTimestamp()) {
+            Instant beforeProcessing = Instant.now();
             // Remove the task state from our map.
             Map<String, TaskState> currentTaskStates = new HashMap<>(currentContext.getTaskStates());
             currentTaskStates.remove(newMessage.getTaskUid());
@@ -92,27 +92,27 @@ public class SyncEventMerger {
 
             // Get a list of partition tokens that the old message contained that the new message
             // didn't.
-            List<PartitionState> previouslyOwnedPartitions = currentTask.getPartitions().stream()
+            List<PartitionState> mergedOwnedPartitions = currentTask.getPartitions().stream()
                     .filter(partitionState -> !newTaskPartitionTokens.contains(
                             partitionState.getToken()))
                     .collect(Collectors.toList());
 
             // Get a list of shared partition tokens that the old message contained that the
             // new message didn't
-            List<PartitionState> previouslySharedPartitions = currentTask.getSharedPartitions().stream()
+            List<PartitionState> mergedSharedPartitions = currentTask.getSharedPartitions().stream()
                     .filter(partitionState -> !newTaskSharedPartitionTokens.contains(
                             partitionState.getToken()))
                     .collect(Collectors.toList());
 
             // Merge the current + new partition tokens and filter out tokens that are REMOVED.
-            List<PartitionState> mergedOwnedPartitions = newTask.getPartitions().stream()
+            List<PartitionState> newOwnedPartitions = newTask.getPartitions().stream()
                     .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
                     .collect(Collectors.toList());
-            mergedOwnedPartitions.addAll(previouslyOwnedPartitions);
-            List<PartitionState> mergedSharedPartitions = newTask.getSharedPartitions().stream()
+            mergedOwnedPartitions.addAll(newOwnedPartitions);
+            List<PartitionState> newSharedPartitions = newTask.getSharedPartitions().stream()
                     .filter(partitionState -> !partitionState.getState().equals(PartitionStateEnum.REMOVED))
                     .collect(Collectors.toList());
-            mergedSharedPartitions.addAll(previouslySharedPartitions);
+            mergedSharedPartitions.addAll(newSharedPartitions);
 
             // build from the new sync context.
             TaskState finalTaskState = newTask.toBuilder().partitions(mergedOwnedPartitions)
@@ -121,14 +121,9 @@ public class SyncEventMerger {
             builder.taskStates(currentTaskStates)
                     .createdTimestamp(Long.max(currentContext.getCreatedTimestamp(),
                             newMessage.getMessageTimestamp()));
-            TaskSyncContext result = builder
-                    .build();
-            LOGGER.info("Processed incremental answer {} ", newMessage);
-            checkDuplicationInTaskSyncEvent(result);
-            return result;
+            // checkDuplicationInTaskSyncEvent(builder.build());
         }
         LOGGER.debug("merge: final state is not changed");
-
         return builder.build();
     }
 
@@ -165,7 +160,7 @@ public class SyncEventMerger {
                     .build();
             LOGGER.info("Processed rebalance answer {} from task {} for rebalance generation id {}", newMessage, newMessage.getTaskUid(),
                     newMessage.getRebalanceGenerationId());
-            checkDuplicationInTaskSyncEvent(result);
+            // checkDuplicationInTaskSyncEvent(result);
             return result;
         }
         LOGGER.debug("merge: final state is not changed");
@@ -219,7 +214,7 @@ public class SyncEventMerger {
 
             debug(LOGGER, "merge: final state {}, \nUpdated uids: {}, epoch: {}",
                     result, updatedStatesUids, result.getRebalanceGenerationId());
-            checkDuplicationInTaskSyncEvent(result);
+            // checkDuplicationInTaskSyncEvent(result);
 
             // Check if there is duplication after merging the message.
             return result;
@@ -247,7 +242,7 @@ public class SyncEventMerger {
                         .stateTimestamp(newMessage.getMessageTimestamp())
                         .build());
         TaskSyncContext result = builder.build();
-        checkDuplicationInTaskSyncEvent(result);
+        // checkDuplicationInTaskSyncEvent(result);
         return result;
     }
 

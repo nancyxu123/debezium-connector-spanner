@@ -42,7 +42,8 @@ public class LeaderAction {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LeaderAction.class);
 
-    private static final Duration EPOCH_OFFSET_UPDATE_DURATION = Duration.ofSeconds(60);
+    // This should be at least 15 minutes for larger pipelines.
+    private static final Duration EPOCH_OFFSET_UPDATE_DURATION = Duration.ofSeconds(15 * 60);
 
     private final TaskSyncContextHolder taskSyncContextHolder;
     private final KafkaConsumerAdminService kafkaAdminService;

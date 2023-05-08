@@ -7,6 +7,8 @@ package io.debezium.connector.spanner.task;
 
 import static org.slf4j.LoggerFactory.getLogger;
 
+import java.time.Instant;
+
 import org.slf4j.Logger;
 
 import io.debezium.connector.spanner.kafka.internal.TaskSyncPublisher;
@@ -46,9 +48,24 @@ public class SyncEventHandler {
             return;
         }
 
+        boolean isLocked = taskSyncContextHolder.isLocked();
+        String holder = taskSyncContextHolder.getHolder();
+        int holdCount = taskSyncContextHolder.getHoldCount();
+        boolean isHeldByCurrentThread = taskSyncContextHolder.isHeldByCurrentThread();
+        Instant now = Instant.now();
+
         taskSyncContextHolder.update(oldContext -> oldContext.toBuilder()
                 .currentKafkaRecordOffset(metadata.getOffset())
                 .build());
+        Instant after = Instant.now();
+        LOGGER.warn(
+                "With task {}, checking SyncEventHandler Time updating current offset: {} and was locked {} holder thread {}, hold count {}, heldByCurrentThread {}",
+                taskSyncContextHolder.get().getTaskUid(),
+                after.toEpochMilli() - now.toEpochMilli(),
+                isLocked,
+                holder,
+                holdCount,
+                isHeldByCurrentThread);
 
         LOGGER.debug("Task {} - update task sync topic offset with {}", taskSyncContextHolder.get().getTaskUid(), metadata.getOffset());
     }
@@ -123,7 +140,25 @@ public class SyncEventHandler {
     }
 
     public void processRegularMessage(TaskSyncEvent inSync, SyncEventMetadata metadata) throws InterruptedException {
+        Instant beginningRegularMessage = Instant.now();
+        boolean wasLocked = taskSyncContextHolder.isLocked();
+        String holder = taskSyncContextHolder.getHolder();
+        int holdCount = taskSyncContextHolder.getHoldCount();
+        boolean isHeldByCurrentThread = taskSyncContextHolder.isHeldByCurrentThread();
+
         taskSyncContextHolder.lock();
+
+        Instant afterLocking = Instant.now();
+        LOGGER.warn(
+                "With task {}, checking SyncEventHandler processRegularMessage locking had lag {} with message type: {}, message size: {}, and wasLocked {} holder thread {}, hold count {}, heldByCurrentThread {}",
+                taskSyncContextHolder.get().getTaskUid(),
+                afterLocking.toEpochMilli() - beginningRegularMessage.toEpochMilli(),
+                inSync.getMessageType(),
+                inSync.toString().length(),
+                wasLocked,
+                holder,
+                holdCount,
+                isHeldByCurrentThread);
         try {
 
             if (!taskSyncContextHolder.get().getRebalanceState().equals(RebalanceState.NEW_EPOCH_STARTED)) {
@@ -135,6 +170,19 @@ public class SyncEventHandler {
             taskSyncContextHolder.update(context -> SyncEventMerger.mergeIncrementalTaskSyncEvent(context, inSync));
 
             eventConsumer.accept(new SyncEvent());
+
+            Instant afterConsuming = Instant.now();
+            LOGGER.warn(
+                    "With task {}, checking SyncEventHandler processRegularMessage overall had lag {} with message type: {}, message size: {}, and wasLocked {}, holder thread {}, hold count {}, heldByCurrentThread {}",
+                    taskSyncContextHolder.get().getTaskUid(),
+                    afterConsuming.toEpochMilli() - beginningRegularMessage.toEpochMilli(),
+                    inSync.getMessageType(),
+                    inSync.toString().length(),
+                    wasLocked,
+                    holder,
+                    holdCount,
+                    isHeldByCurrentThread);
+
         }
         finally {
             taskSyncContextHolder.unlock();
@@ -172,17 +220,53 @@ public class SyncEventHandler {
         }
 
         try {
+            Instant now = Instant.now();
             if (inSync.getMessageType() == MessageTypeEnum.REGULAR) {
+                Instant regularMessageBegin = Instant.now();
                 processRegularMessage(inSync, metadata);
+                Instant regularMessageEnd = Instant.now();
+                LOGGER.warn("Task {}, regular message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        regularMessageEnd.toEpochMilli() - regularMessageBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
             }
             else if (inSync.getMessageType() == MessageTypeEnum.REBALANCE_ANSWER) {
+                Instant rebalanceAnswerBegin = Instant.now();
                 processRebalanceAnswer(inSync, metadata);
+                Instant rebalanceAnswerEnd = Instant.now();
+                LOGGER.warn("Task {}, rebalance message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        rebalanceAnswerEnd.toEpochMilli() - rebalanceAnswerBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
             }
             else if (inSync.getMessageType() == MessageTypeEnum.UPDATE_EPOCH) {
+                Instant updateEpochBegin = Instant.now();
                 processUpdateEpoch(inSync, metadata);
+                Instant updateEpochEnd = Instant.now();
+                LOGGER.warn("Task {}, update epoch message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        updateEpochEnd.toEpochMilli() - updateEpochBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
             }
             else if (inSync.getMessageType() == MessageTypeEnum.NEW_EPOCH) {
+                Instant newEpochBegin = Instant.now();
                 processNewEpoch(inSync, metadata);
+                Instant newEpochEnd = Instant.now();
+                LOGGER.warn("Task {}, new epoch message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        newEpochEnd.toEpochMilli() - newEpochBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
+            }
+            Instant end = Instant.now();
+            if (end.toEpochMilli() - now.toEpochMilli() > 1000) {
+                LOGGER.warn("Task {} Took very long to process this with message type: {} and message size: {} and lag {}", taskSyncContextHolder.get().getTaskUid(),
+                        inSync.getMessageType(),
+                        inSync.toString().length(),
+                        end.toEpochMilli() - now.toEpochMilli());
             }
         }
 

@@ -158,7 +158,7 @@ public class BufferedPublisher {
         TaskSyncEvent mergedSyncEvent = toMerge.toBuilder().taskStates(taskStates).build();
         LOGGER.info("Buffered merged value: {} with toMerge {} and existing {}", mergedSyncEvent, toMerge, existing);
 
-        checkDuplicationInTaskSyncEvent(mergedSyncEvent);
+        // checkDuplicationInTaskSyncEvent(mergedSyncEvent);
 
         return mergedSyncEvent;
     }

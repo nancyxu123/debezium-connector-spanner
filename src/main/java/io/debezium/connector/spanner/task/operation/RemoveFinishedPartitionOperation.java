@@ -8,6 +8,7 @@ package io.debezium.connector.spanner.task.operation;
 import static org.slf4j.LoggerFactory.getLogger;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -38,40 +39,35 @@ public class RemoveFinishedPartitionOperation implements Operation {
 
         TaskState taskState = taskSyncContext.getCurrentTaskState();
 
+        Instant start = Instant.now();
         List<PartitionState> partitions = taskState.getPartitions().stream()
                 .map(
                         partitionState -> {
-                            if (partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                            if (!partitionState.getState().equals(PartitionStateEnum.FINISHED)) {
+                                return partitionState;
+                            }
+
+                            if (partitionState.getFinishedTimestamp() == null) {
+                                throw new IllegalStateException(
+                                        "FinishedTimestamp must be specified for finished partitions");
+                            }
+                            Timestamp deletionTime = Timestamp.ofTimeSecondsAndNanos(
+                                    partitionState.getFinishedTimestamp().getSeconds()
+                                            + DELETION_DELAY.getSeconds(),
+                                    0);
+                            Timestamp currentTime = Timestamp.now();
+                            if (deletionTime.compareTo(currentTime) < 0
                                     && allChildrenFinishedAndAtLeastOnePresent(
                                             taskSyncContext, partitionState.getToken())) {
-
-                                if (partitionState.getFinishedTimestamp() == null) {
-                                    throw new IllegalStateException(
-                                            "FinishedTimestamp must be specified for finished partitions");
-                                }
-
-                                Timestamp deletionTime = Timestamp.ofTimeSecondsAndNanos(
-                                        partitionState.getFinishedTimestamp().getSeconds()
-                                                + DELETION_DELAY.getSeconds(),
-                                        0);
-                                Timestamp currentTime = Timestamp.now();
-                                if (deletionTime.compareTo(currentTime) < 0) {
-                                    LOGGER.info(
-                                            "Partition {} will be removed from the task with finished timestamp {},"
-                                                    + " deletion timestamp {} and current time {}",
-                                            partitionState,
-                                            partitionState.getFinishedTimestamp(),
-                                            deletionTime,
-                                            currentTime);
-                                    removedFinishedPartitions.add(partitionState.getToken());
-                                    return null;
-                                }
                                 LOGGER.info(
-                                        "Partition {} will not be removed from the task since deletion timestamp"
-                                                + " {}, finished timestamp {} is less than now {}",
-                                        deletionTime,
+                                        "Partition {} will be removed from the task with finished timestamp {},"
+                                                + " deletion timestamp {} and current time {}",
+                                        partitionState,
                                         partitionState.getFinishedTimestamp(),
+                                        deletionTime,
                                         currentTime);
+                                removedFinishedPartitions.add(partitionState.getToken());
+                                return null;
                             }
                             return partitionState;
                         })
@@ -81,7 +77,13 @@ public class RemoveFinishedPartitionOperation implements Operation {
         if (taskState.getPartitions().size() != partitions.size()) {
             this.isRequiredPublishSyncEvent = true;
         }
+        Instant end = Instant.now();
 
+        LOGGER.warn(
+                "With task {}, Time for RemovedFinishedPartitions to remove partitions {} with partition count {} and removedPartitionCount {}",
+                taskSyncContext.getTaskUid(),
+                end.toEpochMilli() - start.toEpochMilli(),
+                taskSyncContext.getCurrentTaskState().getPartitions().size(), removedFinishedPartitions.size());
         return taskSyncContext.toBuilder()
                 .currentTaskState(taskState.toBuilder().partitions(partitions).build())
                 .build();

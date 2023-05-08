@@ -9,6 +9,7 @@ import static io.debezium.connector.spanner.task.LoggerUtils.debug;
 import static org.slf4j.LoggerFactory.getLogger;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -129,9 +130,11 @@ public class TaskSyncEventListener {
                             }
                             catch (org.apache.kafka.common.errors.InterruptException
                                     | InterruptedException ex) {
+                                LOGGER.error("ERROR DURING POLL FROM SYNC TOPIC: {}", ex);
                                 return;
                             }
                             catch (Exception e) {
+                                LOGGER.error("ERROR DURING POLL FROM SYNC TOPIC: {}", e);
                                 errorHandler.accept(
                                         new SpannerConnectorException("Error during poll from the Sync Topic", e));
                                 return;
@@ -149,8 +152,11 @@ public class TaskSyncEventListener {
     }
 
     private int poll(Consumer<String, byte[]> consumer, long endOffset)
-            throws InvalidProtocolBufferException, InterruptedException {
+            throws InvalidProtocolBufferException, InterruptedException, Exception {
 
+        Instant now = Instant.now();
+        TopicPartition topicPartition = new TopicPartition(topic, 0);
+        long beginningPosition = consumer.position(topicPartition);
         ConsumerRecords<String, byte[]> records = consumer.poll(pollDuration);
         LOGGER.trace("listen: poll messages count: {}", records.count());
 
@@ -158,12 +164,22 @@ public class TaskSyncEventListener {
             return 0;
         }
 
+        Instant processingTime = Instant.now();
+
+        int recordBytes = 0;
+        Instant beforeFetchingRecord = Instant.now();
         for (ConsumerRecord<String, byte[]> record : records) {
 
+            Instant parsingBeginTime = Instant.now();
             TaskSyncEvent taskSyncEvent = parseSyncEvent(record);
+            Instant parsingEndTime = Instant.now();
             debug(LOGGER, "Receive SyncEvent from Kafka topic: {}", taskSyncEvent);
+            int serializedValueSize = record.serializedValueSize();
+            recordBytes += serializedValueSize;
 
+            int i = 0;
             for (BlockingBiConsumer<TaskSyncEvent, SyncEventMetadata> eventConsumer : eventConsumers) {
+                Instant beginFetchingRecord = Instant.now();
                 eventConsumer.accept(
                         taskSyncEvent,
                         SyncEventMetadata.builder()
@@ -172,7 +188,38 @@ public class TaskSyncEventListener {
                                 // start of the connector, we can then connect to the rebalance topic.
                                 .canInitiateRebalancing(record.offset() >= endOffset - 1)
                                 .build());
+                Instant computationEndTime = Instant.now();
+                LOGGER.warn(
+                        "With task {}, Polling iteration: {} Time parsing record {}, Time processing record: {}, record type {}, record bytes {} and event consumer {} and total event consumers {}",
+                        consumerGroup,
+                        now.toString(),
+                        parsingEndTime.toEpochMilli() - parsingBeginTime.toEpochMilli(),
+                        computationEndTime.toEpochMilli() - beginFetchingRecord.toEpochMilli(),
+                        taskSyncEvent.getMessageType(), serializedValueSize, i, eventConsumers.size());
+                i++;
             }
+            // if (record.serializedValueSize() > 1000000) {
+            // LOGGER.info("With task {}, Polling iteration: {} with large record {} with message type {} and parsing time {}, processing time {}, record fetch time {}",
+            // consumerGroup,
+            // now.toString(),
+            // record.serializedValueSize(),
+            // taskSyncEvent.getMessageType(), parsingEndTime.toEpochMilli() - parsingBeginTime.toEpochMilli(),
+            // computationEndTime.toEpochMilli() - parsingEndTime.toEpochMilli(),
+            // parsingBeginTime.toEpochMilli() - beforeFetchingRecord.toEpochMilli());
+            // }
+        }
+        Instant end = Instant.now();
+        if (end.toEpochMilli() - now.toEpochMilli() > 1000) {
+            LOGGER.warn(
+                    "With task {}, Polling iteration: {} long poll with long lag {}, fetch time {}, processing time {}, record count {}, record bytes {}, original position {}, ending position {}",
+                    consumerGroup, now.toString(),
+                    end.toEpochMilli() - now.toEpochMilli(),
+                    processingTime.toEpochMilli() - now.toEpochMilli(),
+                    end.toEpochMilli() - processingTime.toEpochMilli(),
+                    records.count(),
+                    recordBytes,
+                    beginningPosition,
+                    consumer.position(topicPartition));
         }
         return records.count();
     }

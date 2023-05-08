@@ -499,12 +499,12 @@ public class TaskSyncContext {
                                 && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
                 .collect(Collectors.groupingBy(PartitionState::getToken));
 
-        Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
-        if (!duplicatesInPartitions.isEmpty()) {
-            LOGGER.warn(
-                    "TaskSyncContext: found duplication in partitionsMap: {}",
-                    duplicatesInPartitions);
-        }
+        // Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+        // if (!duplicatesInPartitions.isEmpty()) {
+        // LOGGER.warn(
+        // "TaskSyncContext: found duplication in partitionsMap: {}",
+        // duplicatesInPartitions);
+        // }
 
         Map<String, PartitionState> partitions = partitionsMap.entrySet().stream()
                 .map(entry -> new AbstractMap.SimpleEntry<>(entry.getKey(), entry.getValue().get(0)))
@@ -515,12 +515,12 @@ public class TaskSyncContext {
                 .filter(partitionState -> !partitions.containsKey(partitionState.getToken()))
                 .collect(Collectors.groupingBy(PartitionState::getToken));
 
-        Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
-        if (!duplicatesInSharedPartitions.isEmpty()) {
-            LOGGER.warn(
-                    "TaskSyncContext: found duplication in sharedPartitionsMap: {}",
-                    duplicatesInSharedPartitions);
-        }
+        // Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+        // if (!duplicatesInSharedPartitions.isEmpty()) {
+        // LOGGER.warn(
+        // "TaskSyncContext: found duplication in sharedPartitionsMap: {}",
+        // duplicatesInSharedPartitions);
+        // }
     }
 
     private Set<String> checkDuplication(Map<String, List<PartitionState>> map) {

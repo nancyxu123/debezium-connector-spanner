@@ -5,6 +5,8 @@
  */
 package io.debezium.connector.spanner.kafka.internal;
 
+import static org.slf4j.LoggerFactory.getLogger;
+
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
@@ -14,6 +16,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.slf4j.Logger;
 
 import io.debezium.connector.spanner.SpannerConnectorConfig;
 
@@ -24,6 +27,7 @@ import io.debezium.connector.spanner.SpannerConnectorConfig;
 public class RebalancingConsumerFactory<K, V> {
 
     private final SpannerConnectorConfig config;
+    private static final Logger LOGGER = getLogger(RebalancingConsumerFactory.class);
 
     public RebalancingConsumerFactory(SpannerConnectorConfig config) {
         this.config = config;
@@ -42,6 +46,8 @@ public class RebalancingConsumerFactory<K, V> {
                         ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName(),
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
                         ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false));
+
+        LOGGER.info("Kafka Sync Event Consumer {}, with config {}", consumerGroup, props);
 
         return new KafkaConsumer<>(props);
     }
