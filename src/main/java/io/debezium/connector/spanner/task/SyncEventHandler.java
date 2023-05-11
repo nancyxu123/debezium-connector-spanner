@@ -8,11 +8,17 @@ package io.debezium.connector.spanner.task;
 import static org.slf4j.LoggerFactory.getLogger;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 
 import io.debezium.connector.spanner.kafka.internal.TaskSyncPublisher;
 import io.debezium.connector.spanner.kafka.internal.model.MessageTypeEnum;
+import io.debezium.connector.spanner.kafka.internal.model.PartitionState;
+import io.debezium.connector.spanner.kafka.internal.model.PartitionStateEnum;
 import io.debezium.connector.spanner.kafka.internal.model.RebalanceState;
 import io.debezium.connector.spanner.kafka.internal.model.SyncEventMetadata;
 import io.debezium.connector.spanner.kafka.internal.model.TaskSyncEvent;
@@ -99,9 +105,10 @@ public class SyncEventHandler {
             if (taskSyncContextHolder.get().getRebalanceState() == RebalanceState.INITIAL_INCREMENTED_STATE_COMPLETED &&
                     inGeneration >= currentGeneration) { // We ignore messages with a stale rebalanceGenerationid.
 
-                LOGGER.info("Task {} - processNewEpoch : {} metadata {}, rebalanceId: {}",
+                LOGGER.info("Task {} - processNewEpoch {}: metadata {}, rebalanceId: {}, current task {}",
                         taskSyncContextHolder.get().getTaskUid(),
                         inSync,
+                        taskSyncContextHolder.get(),
                         metadata,
                         taskSyncContextHolder.get().getRebalanceGenerationId());
 
@@ -112,11 +119,49 @@ public class SyncEventHandler {
 
                 taskSyncPublisher.send(taskSyncContextHolder.get().buildCurrentTaskSyncEvent());
             }
+
+            TaskSyncEvent taskSyncEvent = taskSyncContextHolder.get().buildCurrentTaskSyncEvent();
+
+            Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed new epoch event {}: found duplication in partitionsMap: {}",
+                        duplicatesInPartitions);
+            }
+
+            Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+            if (!duplicatesInSharedPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed new epoch event: found duplication in sharedPartitionsMap: {}",
+                        duplicatesInSharedPartitions);
+            }
+
         }
         finally {
             taskSyncContextHolder.unlock();
         }
 
+    }
+
+    private Set<String> checkDuplication(Map<String, List<PartitionState>> map) {
+        return map.entrySet().stream()
+                .filter(entry -> entry.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     public void processUpdateEpoch(TaskSyncEvent inSync, SyncEventMetadata metadata) throws InterruptedException {
@@ -133,6 +178,35 @@ public class SyncEventHandler {
             taskSyncContextHolder.update(context -> SyncEventMerger.mergeEpochUpdate(context, inSync));
 
             eventConsumer.accept(new SyncEvent());
+
+            TaskSyncEvent taskSyncEvent = taskSyncContextHolder.get().buildCurrentTaskSyncEvent();
+            Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed update epoch event {}: found duplication in partitionsMap: {}",
+                        duplicatesInPartitions);
+            }
+
+            Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+            if (!duplicatesInSharedPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed update epoch event: found duplication in sharedPartitionsMap: {}",
+                        duplicatesInSharedPartitions);
+            }
         }
         finally {
             taskSyncContextHolder.unlock();
@@ -182,6 +256,35 @@ public class SyncEventHandler {
                     holder,
                     holdCount,
                     isHeldByCurrentThread);
+
+            TaskSyncEvent taskSyncEvent = taskSyncContextHolder.get().buildCurrentTaskSyncEvent();
+            Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed incremental  event {}: found duplication in partitionsMap: {}",
+                        duplicatesInPartitions);
+            }
+
+            Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+            if (!duplicatesInSharedPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed incremental event: found duplication in sharedPartitionsMap: {}",
+                        duplicatesInSharedPartitions);
+            }
 
         }
         finally {

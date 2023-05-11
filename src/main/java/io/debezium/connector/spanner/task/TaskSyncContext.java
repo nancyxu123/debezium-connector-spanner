@@ -101,7 +101,6 @@ public class TaskSyncContext {
         List<PartitionState> ownedPartitionsToAdd = new ArrayList<PartitionState>();
         ownedPartitionsToAdd.addAll(newOwnedPartitions);
         ownedPartitionsToAdd.addAll(newRemovedOwnedPartitions);
-        LOGGER.info("Final list of owned partitions to add: {}", ownedPartitionsToAdd);
 
         // Add all partitions that are newly shared by this task.
         List<PartitionState> newSharedPartitions = currentTaskState.getSharedPartitions().stream()

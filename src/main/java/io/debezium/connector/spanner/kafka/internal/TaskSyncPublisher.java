@@ -82,9 +82,8 @@ public class TaskSyncPublisher {
             if (Instant.now().isAfter(sendTime.plus(Duration.ofSeconds(60)))) {
                 long seconds = Instant.now().getEpochSecond() - sendTime.getEpochSecond();
                 LOGGER.info(
-                        "Task Uid {} published record {} with {} seconds latency",
+                        "Task Uid {} published record with {} seconds latency",
                         this.taskUid,
-                        record,
                         seconds);
             }
 

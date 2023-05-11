@@ -160,7 +160,7 @@ public class LowWatermarkCalculator {
                 .orElse(spannerConnectorConfig.startTime());
         final long currentTime = new Date().getTime();
         long currentLag = currentTime - lowWatermarkTimestamp.toDate().getTime();
-        if (currentLag > OFFSET_MONITORING_LAG_MAX_MS) {
+        if (currentLag > OFFSET_MONITORING_LAG_MAX_MS && printOffsets) {
             LOGGER.warn("Very old watermark is being calculated {} with current lag {} and connector start time {}",
                     lowWatermarkTimestamp, currentLag, spannerConnectorConfig.startTime());
         }
@@ -180,14 +180,14 @@ public class LowWatermarkCalculator {
                         String token = partitionState.getToken();
                         long lag = now - timestamp.toDate().getTime();
                         if (lag > OFFSET_MONITORING_LAG_MAX_MS) {
-                            LOGGER.warn("Partition has a very old offset, lag: {}, token: {}", lag, token);
+                            LOGGER.warn("Partition has a very old offset, lag: {}, token: {}, state: {}", lag, token, partitionState.getState());
                         }
                     }
                     else if (partitionState.getStartTimestamp() != null) {
                         String token = partitionState.getToken();
                         long lag = now - partitionState.getStartTimestamp().toDate().getTime();
                         if (lag > OFFSET_MONITORING_LAG_MAX_MS) {
-                            LOGGER.warn("Partition has a very old start time, lag: {}, token: {}", lag, token);
+                            LOGGER.warn("Partition has a very old start time, lag: {}, token: {}, state: {}", lag, token, partitionState.getState());
                         }
                     }
                 });

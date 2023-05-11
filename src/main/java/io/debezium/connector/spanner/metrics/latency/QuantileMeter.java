@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.apache.commons.lang3.ArrayUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.datadoghq.sketch.ddsketch.DDSketch;
 import com.datadoghq.sketch.ddsketch.DDSketches;
@@ -22,6 +24,8 @@ import io.debezium.connector.spanner.task.utils.TimeoutMeter;
  * Utility to calculate quantiles for streaming data
  */
 public class QuantileMeter {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(QuantileMeter.class);
 
     private static final int QUEUE_SIZE = 1000;
     private static final double[] QUANTILES = { 0.5, 0.95, 0.99 };
@@ -57,6 +61,8 @@ public class QuantileMeter {
                     }
                 }
                 catch (InterruptedException e) {
+                    LOGGER.info("Interrupting QuantileMeter with exception {}", e);
+
                     Thread.currentThread().interrupt();
                     return;
                 }
@@ -95,6 +101,8 @@ public class QuantileMeter {
 
     public void shutdown() {
         this.reset();
+        LOGGER.info("Interrupting QuantileMeter");
+
         this.thread.interrupt();
     }
 

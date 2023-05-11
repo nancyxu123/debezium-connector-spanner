@@ -70,6 +70,7 @@ public class TaskStateChangeEventProcessor {
                             event.getClass().getSimpleName(), event);
                 }
                 catch (InterruptedException e) {
+                    LOGGER.info("Interrupting createEventHandlerThread with exception {}", e);
                     Thread.currentThread().interrupt();
                     return;
                 }
@@ -87,6 +88,7 @@ public class TaskStateChangeEventProcessor {
                     this.taskStateChangeEventHandler.processEvent(event);
                 }
                 catch (InterruptedException e) {
+                    LOGGER.info("Interrupting createEventHandlerThread with exception {}", e);
                     Thread.currentThread().interrupt();
                 }
                 finally {
@@ -121,6 +123,7 @@ public class TaskStateChangeEventProcessor {
         if (thread != null) {
             this.queue.clear();
 
+            LOGGER.info("Interrupting createEventHandlerThread");
             this.thread.interrupt();
             this.thread = null;
         }

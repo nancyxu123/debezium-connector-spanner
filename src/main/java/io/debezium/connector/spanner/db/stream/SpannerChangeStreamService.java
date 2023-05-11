@@ -64,7 +64,7 @@ public class SpannerChangeStreamService {
                 List<ChangeStreamEvent> events = changeStreamRecordMapper.toChangeStreamEvents(
                         partition,
                         resultSet, resultSet.getMetadata());
-                LOGGER.debug("Task: {}, Events receive from stream: {}", taskUid, events);
+                LOGGER.info("Task: {}, Events receive from stream: {} with token {}", taskUid, events, token);
 
                 if (!events.isEmpty() && (events.get(0) instanceof HeartbeatEvent)) {
                     var heartbeatEvent = (HeartbeatEvent) events.get(0);

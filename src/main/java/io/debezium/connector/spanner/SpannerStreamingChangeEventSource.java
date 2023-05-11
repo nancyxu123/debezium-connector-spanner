@@ -166,6 +166,7 @@ public class SpannerStreamingChangeEventSource implements CommittingRecordsStrea
             finishPartitionWatchDog.stop();
 
             if (thread != null) {
+                LOGGER.info("Stopping thread SpannerConnector-SpannerStreamingChangeEventSource");
                 thread.interrupt();
             }
         }
@@ -241,6 +242,7 @@ public class SpannerStreamingChangeEventSource implements CommittingRecordsStrea
                 }
             }
             catch (InterruptedException e) {
+                LOGGER.info("Interrupting SpannerConnector-SpannerStreamingChangeEventSource task");
                 Thread.currentThread().interrupt();
             }
             catch (Exception ex) {

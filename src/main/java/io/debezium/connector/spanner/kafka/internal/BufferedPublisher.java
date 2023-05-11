@@ -86,18 +86,15 @@ public class BufferedPublisher {
         else {
             TaskSyncEvent updatedValue = value.updateAndGet(
                     originalValue -> mergeTaskSyncEvent(taskUid, originalValue, update));
-            LOGGER.info("Updated value: {} and retrieved value {}", updatedValue, value.get());
         }
     }
 
     public static TaskSyncEvent mergeTaskSyncEvent(String task, TaskSyncEvent originalValue, TaskSyncEvent newValue) {
         TaskSyncEvent toMerge = newValue;
-        LOGGER.info("TaskUID: {}", toMerge.getTaskUid());
         TaskSyncEvent existing = originalValue;
         TaskState toMergeTask = toMerge.getTaskStates().get(task);
 
         if (toMergeTask == null) {
-            LOGGER.warn("TaskSyncEvent does not contain the task uid {}, {}", task, toMerge);
             if (existing == null) {
                 return null;
             }
@@ -107,13 +104,10 @@ public class BufferedPublisher {
 
         if (existing == null) {
             // If there is no existing value, we should just return the new task sync event.
-            LOGGER.info("Buffered existing value: {}", toMerge);
             return toMerge;
         }
 
         TaskState existingTask = existing.getTaskStates().get(task);
-        LOGGER.info("To merge: {}", toMerge);
-        LOGGER.info("Existing: {}", existing);
 
         // Get a list of partition tokens that are newly modified by new message
         List<String> newlyOwnedPartitions = toMergeTask.getPartitions().stream()
@@ -156,7 +150,6 @@ public class BufferedPublisher {
         // Put the final task state into the merged task sync event.
         taskStates.put(task, finalTaskState);
         TaskSyncEvent mergedSyncEvent = toMerge.toBuilder().taskStates(taskStates).build();
-        LOGGER.info("Buffered merged value: {} with toMerge {} and existing {}", mergedSyncEvent, toMerge, existing);
 
         // checkDuplicationInTaskSyncEvent(mergedSyncEvent);
 
@@ -168,7 +161,7 @@ public class BufferedPublisher {
         TaskSyncEvent item = this.value.getAndSet(null);
 
         if (item != null) {
-            LOGGER.info("Publishing buffered: {}", item);
+            LOGGER.info("Publishing task sync event for task {}: {}", item.getTaskUid(), item);
             this.onPublish.accept(item);
         }
     }

@@ -41,6 +41,8 @@ public class SyncEventMerger {
     public static TaskSyncContext mergeIncrementalTaskSyncEvent(TaskSyncContext currentContext, TaskSyncEvent newMessage) {
         Map<String, TaskState> newTaskStatesMap = newMessage.getTaskStates();
         debug(LOGGER, "merge: state before {}, \nIncoming states: {}", currentContext, newTaskStatesMap);
+        LOGGER.info("Task: {}, Processed incremental answer from task {}: {}", currentContext.getTaskUid(), newMessage.getTaskUid(),
+                newMessage);
 
         // Get the current context.
         var builder = currentContext.toBuilder();

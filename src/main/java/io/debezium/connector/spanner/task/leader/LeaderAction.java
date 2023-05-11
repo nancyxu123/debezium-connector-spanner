@@ -10,15 +10,19 @@ import static io.debezium.connector.spanner.task.TaskStateUtil.filterSurvivedTas
 import static io.debezium.connector.spanner.task.TaskStateUtil.splitSurvivedAndObsoleteTaskStates;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.debezium.connector.spanner.kafka.internal.KafkaConsumerAdminService;
 import io.debezium.connector.spanner.kafka.internal.TaskSyncPublisher;
+import io.debezium.connector.spanner.kafka.internal.model.PartitionState;
+import io.debezium.connector.spanner.kafka.internal.model.PartitionStateEnum;
 import io.debezium.connector.spanner.kafka.internal.model.RebalanceState;
 import io.debezium.connector.spanner.kafka.internal.model.TaskState;
 import io.debezium.connector.spanner.kafka.internal.model.TaskSyncEvent;
@@ -79,6 +83,8 @@ public class LeaderAction {
 
                 LOGGER.info("performLeaderAction: Task {} stop leader thread", taskSyncContextHolder.get().getTaskUid());
 
+                LOGGER.info("Interrupting performLeaderAction with exception {} for task {}", e, taskSyncContextHolder.get().getTaskUid());
+
                 Thread.currentThread().interrupt();
                 return;
             }
@@ -93,6 +99,7 @@ public class LeaderAction {
                 catch (InterruptedException e) {
 
                     LOGGER.info("performLeaderAction: Task {} stop leader thread", taskSyncContextHolder.get().getTaskUid());
+                    LOGGER.info("Interrupting performLeaderAction with exception {} for task {}", e, taskSyncContextHolder.get().getTaskUid());
 
                     Thread.currentThread().interrupt();
                     return;
@@ -179,6 +186,34 @@ public class LeaderAction {
 
         TaskSyncEvent taskSyncEvent = taskSyncContext.buildNewEpochTaskSyncEvent();
 
+        Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getPartitions().stream())
+                .filter(
+                        partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+
+        Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+        if (!duplicatesInPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "new epoch event: found duplication in partitionsMap: {}",
+                    duplicatesInPartitions);
+        }
+
+        Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                .filter(
+                        partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                .collect(Collectors.groupingBy(PartitionState::getToken));
+
+        Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+        if (!duplicatesInSharedPartitions.isEmpty()) {
+            LOGGER.warn(
+                    "new epoch event: found duplication in sharedPartitionsMap: {}",
+                    duplicatesInSharedPartitions);
+        }
+
         LOGGER.info("Task {} - LeaderAction sent sync event start new epoch {}:{}", taskSyncContext.getTaskUid(),
                 taskSyncContext.getRebalanceGenerationId(), taskSyncContext.getEpochOffsetHolder().getEpochOffset());
 
@@ -190,6 +225,13 @@ public class LeaderAction {
         }
 
         debug(LOGGER, "performLeaderActions: new epoch {}", taskSyncEvent);
+    }
+
+    private Set<String> checkDuplication(Map<String, List<PartitionState>> map) {
+        return map.entrySet().stream()
+                .filter(entry -> entry.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
 }

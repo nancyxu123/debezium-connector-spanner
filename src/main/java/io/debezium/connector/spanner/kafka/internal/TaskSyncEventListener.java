@@ -260,6 +260,7 @@ public class TaskSyncEventListener {
         }
         catch (org.apache.kafka.common.errors.InterruptException e) {
             if (!Thread.currentThread().isInterrupted()) {
+                LOGGER.info("Interrupting shutdownConsumer task {}", consumerGroup);
                 Thread.currentThread().interrupt();
             }
         }
@@ -269,6 +270,7 @@ public class TaskSyncEventListener {
         if (thread == null) {
             return;
         }
+        LOGGER.info("shutdown task sync event listener {}", consumerGroup);
         thread.interrupt();
 
         while (!thread.getState().equals(Thread.State.TERMINATED)) {

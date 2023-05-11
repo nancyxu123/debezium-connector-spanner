@@ -62,7 +62,7 @@ public class RemoveFinishedPartitionOperation implements Operation {
                                 LOGGER.info(
                                         "Partition {} will be removed from the task with finished timestamp {},"
                                                 + " deletion timestamp {} and current time {}",
-                                        partitionState,
+                                        partitionState.getToken(),
                                         partitionState.getFinishedTimestamp(),
                                         deletionTime,
                                         currentTime);
