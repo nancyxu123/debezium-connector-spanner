@@ -8,6 +8,7 @@ package io.debezium.connector.spanner.task;
 import static java.util.stream.Collectors.toList;
 import static org.slf4j.LoggerFactory.getLogger;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -69,22 +70,39 @@ public class TaskStateChangeEventProcessor {
                             event.getClass().getSimpleName(), event);
                 }
                 catch (InterruptedException e) {
+                    LOGGER.info("Interrupting createEventHandlerThread with exception {}", e);
                     Thread.currentThread().interrupt();
                     return;
                 }
 
                 taskSyncContextHolder.awaitNewEpoch();
 
+                boolean isLocked = this.taskSyncContextHolder.isLocked();
+                String holder = this.taskSyncContextHolder.getHolder();
+                Instant beforeLocking = Instant.now();
                 this.taskSyncContextHolder.lock();
+                Instant processEventBegin = Instant.now();
+
                 try {
+
                     this.taskStateChangeEventHandler.processEvent(event);
                 }
                 catch (InterruptedException e) {
+                    LOGGER.info("Interrupting createEventHandlerThread with exception {}", e);
                     Thread.currentThread().interrupt();
                 }
                 finally {
                     this.taskSyncContextHolder.unlock();
                 }
+                Instant processEventEnd = Instant.now();
+                LOGGER.warn(
+                        "With task {}, Time for event {} for TaskStateChangeEventHandler to process {} and lock {} with isLocked{} and holder {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        event,
+                        processEventEnd.toEpochMilli() - processEventBegin.toEpochMilli(),
+                        processEventBegin.toEpochMilli() - beforeLocking.toEpochMilli(),
+                        isLocked, holder);
+
             }
         }, "SpannerConnector-TaskStateChangeEventProcessor");
 
@@ -105,6 +123,7 @@ public class TaskStateChangeEventProcessor {
         if (thread != null) {
             this.queue.clear();
 
+            LOGGER.info("Interrupting createEventHandlerThread");
             this.thread.interrupt();
             this.thread = null;
         }

@@ -7,6 +7,9 @@ package io.debezium.connector.spanner.task.utils;
 
 import java.time.Duration;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Executes action after specified delay,
  * if this action will not be overridden by a new one.
@@ -15,6 +18,8 @@ import java.time.Duration;
  * will be cancelled and time of the delay will be started again.
  */
 public class ResettableDelayedAction {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ResettableDelayedAction.class);
 
     private final Duration timeOut;
 
@@ -38,6 +43,7 @@ public class ResettableDelayedAction {
                 clear();
             }
             catch (InterruptedException e) {
+                LOGGER.info("Interrupting resettabledelayedaction with name {} with exception {}", name, e);
                 Thread.currentThread().interrupt();
             }
         }, "SpannerConnector-" + name);

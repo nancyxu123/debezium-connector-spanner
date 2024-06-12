@@ -16,6 +16,8 @@ import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.admin.NewPartitions;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.TopicConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.debezium.connector.spanner.SpannerConnectorConfig;
 import io.debezium.connector.spanner.config.BaseSpannerConnectorConfig;
@@ -25,6 +27,8 @@ import io.debezium.connector.spanner.kafka.KafkaUtils;
  * Provides functionality to create and change Rebalance and Sync topics
  */
 public class KafkaInternalTopicAdminService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(KafkaInternalTopicAdminService.class);
+
     private final AdminClient adminClient;
     private final SpannerConnectorConfig config;
 
@@ -49,6 +53,8 @@ public class KafkaInternalTopicAdminService {
             }
         }
         catch (InterruptedException e) {
+            String rebalancingTopic = config.rebalancingTopic();
+            LOGGER.info("Interrupting create verify rebalance topic for task {}", rebalancingTopic);
             Thread.currentThread().interrupt();
         }
         catch (Exception e) {
@@ -82,6 +88,8 @@ public class KafkaInternalTopicAdminService {
             }
         }
         catch (InterruptedException e) {
+            String syncTopic = config.taskSyncTopic();
+            LOGGER.info("Interrupting create verify sync topic for task {}", syncTopic);
             Thread.currentThread().interrupt();
         }
         catch (Exception e) {

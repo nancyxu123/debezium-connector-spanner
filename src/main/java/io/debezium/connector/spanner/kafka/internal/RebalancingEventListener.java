@@ -91,6 +91,7 @@ public class RebalancingEventListener {
                         rebalancingAction.accept(lastRebalanceEventMetadata);
                     }
                     catch (InterruptedException ex) {
+                        LOGGER.info("Interrupting RebalancingEventLIstener for task {} with exception {}", task.getTaskUid(), ex);
                         Thread.currentThread().interrupt();
                     }
                 });
@@ -155,6 +156,7 @@ public class RebalancingEventListener {
             return;
         }
 
+        LOGGER.info("Interrupting RebalancingEventLIstener");
         this.thread.interrupt();
 
         while (!this.thread.getState().equals(Thread.State.TERMINATED)) {

@@ -7,16 +7,20 @@ package io.debezium.connector.spanner.task;
 
 import static org.slf4j.LoggerFactory.getLogger;
 
-import java.util.HashMap;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 
 import io.debezium.connector.spanner.kafka.internal.TaskSyncPublisher;
 import io.debezium.connector.spanner.kafka.internal.model.MessageTypeEnum;
+import io.debezium.connector.spanner.kafka.internal.model.PartitionState;
+import io.debezium.connector.spanner.kafka.internal.model.PartitionStateEnum;
 import io.debezium.connector.spanner.kafka.internal.model.RebalanceState;
 import io.debezium.connector.spanner.kafka.internal.model.SyncEventMetadata;
-import io.debezium.connector.spanner.kafka.internal.model.TaskState;
 import io.debezium.connector.spanner.kafka.internal.model.TaskSyncEvent;
 import io.debezium.connector.spanner.task.state.SyncEvent;
 import io.debezium.connector.spanner.task.state.TaskStateChangeEvent;
@@ -50,9 +54,24 @@ public class SyncEventHandler {
             return;
         }
 
+        boolean isLocked = taskSyncContextHolder.isLocked();
+        String holder = taskSyncContextHolder.getHolder();
+        int holdCount = taskSyncContextHolder.getHoldCount();
+        boolean isHeldByCurrentThread = taskSyncContextHolder.isHeldByCurrentThread();
+        Instant now = Instant.now();
+
         taskSyncContextHolder.update(oldContext -> oldContext.toBuilder()
                 .currentKafkaRecordOffset(metadata.getOffset())
                 .build());
+        Instant after = Instant.now();
+        LOGGER.warn(
+                "With task {}, checking SyncEventHandler Time updating current offset: {} and was locked {} holder thread {}, hold count {}, heldByCurrentThread {}",
+                taskSyncContextHolder.get().getTaskUid(),
+                after.toEpochMilli() - now.toEpochMilli(),
+                isLocked,
+                holder,
+                holdCount,
+                isHeldByCurrentThread);
 
         LOGGER.debug("Task {} - update task sync topic offset with {}", taskSyncContextHolder.get().getTaskUid(), metadata.getOffset());
     }
@@ -62,42 +81,21 @@ public class SyncEventHandler {
         if (!RebalanceState.START_INITIAL_SYNC.equals(taskSyncContextHolder.get().getRebalanceState())) {
             return;
         }
-        if (skipFromPreviousGeneration(inSync)) {
-            return;
-        }
 
-        taskSyncContextHolder.lock();
-        try {
+        process(inSync, metadata);
 
-            if (inSync != null) {
-                LOGGER.debug("Task {} - processPreviousStates - merge", taskSyncContextHolder.get().getTaskUid());
+        if (metadata.isCanInitiateRebalancing()) {
+            LOGGER.debug("Task {} - processPreviousStates - switch state to INITIAL_INCREMENTED_STATE_COMPLETED",
+                    taskSyncContextHolder.get().getTaskUid());
 
-                taskSyncContextHolder.update(context -> SyncEventMerger.merge(context, inSync));
-            }
-
-            if (metadata.isCanInitiateRebalancing()) {
-                LOGGER.debug("Task {} - processPreviousStates - switch state to INITIAL_INCREMENTED_STATE_COMPLETED",
-                        taskSyncContextHolder.get().getTaskUid());
-
-                taskSyncContextHolder.update(context -> context.toBuilder()
-                        .rebalanceState(RebalanceState.INITIAL_INCREMENTED_STATE_COMPLETED)
-                        .epochOffsetHolder(context.getEpochOffsetHolder().nextOffset(context.getCurrentKafkaRecordOffset()))
-                        .build());
-            }
-        }
-        finally {
-            taskSyncContextHolder.unlock();
+            taskSyncContextHolder.update(context -> context.toBuilder()
+                    .rebalanceState(RebalanceState.INITIAL_INCREMENTED_STATE_COMPLETED)
+                    .epochOffsetHolder(context.getEpochOffsetHolder().nextOffset(context.getCurrentKafkaRecordOffset()))
+                    .build());
         }
     }
 
     public void processNewEpoch(TaskSyncEvent inSync, SyncEventMetadata metadata) throws InterruptedException {
-        if (inSync == null) {
-            return;
-        }
-        if (skipFromPreviousGeneration(inSync)) {
-            return;
-        }
-
         taskSyncContextHolder.lock();
         try {
 
@@ -105,36 +103,53 @@ public class SyncEventHandler {
             long inGeneration = inSync.getRebalanceGenerationId();
 
             if (taskSyncContextHolder.get().getRebalanceState() == RebalanceState.INITIAL_INCREMENTED_STATE_COMPLETED &&
-                    inSync.getMessageType() == MessageTypeEnum.NEW_EPOCH &&
                     inGeneration >= currentGeneration) { // We ignore messages with a stale rebalanceGenerationid.
 
-                LOGGER.debug("Task {} - processNewEpoch : {} metadata {}, rebalanceId: {}",
+                LOGGER.info("Task {} - processNewEpoch {}: metadata {}, rebalanceId: {}, current task {}",
                         taskSyncContextHolder.get().getTaskUid(),
                         inSync,
+                        taskSyncContextHolder.get(),
                         metadata,
                         taskSyncContextHolder.get().getRebalanceGenerationId());
 
-                Map<String, TaskState> taskStates = new HashMap<>(inSync.getTaskStates());
-                taskStates.remove(taskSyncContextHolder.get().getTaskUid());
-                // When we receive NEW_EPOCH messages, we clear all task states belonging to tasks
-                // other than the current task state, and replace them with entries from the
-                // NEW_EPOCH message.
-                taskSyncContextHolder.update(context -> context.toBuilder()
-                        .rebalanceState(RebalanceState.NEW_EPOCH_STARTED)
-                        .createdTimestamp(inSync.getMessageTimestamp())
-                        .taskStates(taskStates)
+                taskSyncContextHolder.update(context -> SyncEventMerger.mergeNewEpoch(context, inSync));
 
-                        // update timestamp for the current task state
-                        .currentTaskState(context.getCurrentTaskState()
-                                .toBuilder()
-                                .stateTimestamp(inSync.getMessageTimestamp())
-                                .build())
-                        .build());
+                LOGGER.info("Task {} - SyncEventHandler sent response for new epoch",
+                        taskSyncContextHolder.get().getTaskUid());
 
-                LOGGER.debug("Task {} - SyncEventHandler sent response for new epoch", taskSyncContextHolder.get().getTaskUid());
-
-                taskSyncPublisher.send(taskSyncContextHolder.get().buildTaskSyncEvent());
+                taskSyncPublisher.send(taskSyncContextHolder.get().buildCurrentTaskSyncEvent());
             }
+
+            TaskSyncEvent taskSyncEvent = taskSyncContextHolder.get().buildCurrentTaskSyncEvent();
+
+            Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed new epoch event {}: found duplication in partitionsMap: {}",
+                        duplicatesInPartitions);
+            }
+
+            Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+            if (!duplicatesInSharedPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed new epoch event: found duplication in sharedPartitionsMap: {}",
+                        duplicatesInSharedPartitions);
+            }
+
         }
         finally {
             taskSyncContextHolder.unlock();
@@ -142,13 +157,14 @@ public class SyncEventHandler {
 
     }
 
-    public void process(TaskSyncEvent inSync, SyncEventMetadata metadata) throws InterruptedException {
-        if (inSync == null) {
-            return;
-        }
-        if (skipFromPreviousGeneration(inSync)) {
-            return;
-        }
+    private Set<String> checkDuplication(Map<String, List<PartitionState>> map) {
+        return map.entrySet().stream()
+                .filter(entry -> entry.getValue().size() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    public void processUpdateEpoch(TaskSyncEvent inSync, SyncEventMetadata metadata) throws InterruptedException {
 
         taskSyncContextHolder.lock();
         try {
@@ -157,11 +173,119 @@ public class SyncEventHandler {
                 return;
             }
 
-            LOGGER.debug("Task {} - process sync event", taskSyncContextHolder.get().getTaskUid());
+            LOGGER.info("Task {} - process epoch update", taskSyncContextHolder.get().getTaskUid());
 
-            taskSyncContextHolder.update(context -> SyncEventMerger.merge(context, inSync));
+            taskSyncContextHolder.update(context -> SyncEventMerger.mergeEpochUpdate(context, inSync));
 
             eventConsumer.accept(new SyncEvent());
+
+            TaskSyncEvent taskSyncEvent = taskSyncContextHolder.get().buildCurrentTaskSyncEvent();
+            Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed update epoch event {}: found duplication in partitionsMap: {}",
+                        duplicatesInPartitions);
+            }
+
+            Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+            if (!duplicatesInSharedPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed update epoch event: found duplication in sharedPartitionsMap: {}",
+                        duplicatesInSharedPartitions);
+            }
+        }
+        finally {
+            taskSyncContextHolder.unlock();
+        }
+    }
+
+    public void processRegularMessage(TaskSyncEvent inSync, SyncEventMetadata metadata) throws InterruptedException {
+        Instant beginningRegularMessage = Instant.now();
+        boolean wasLocked = taskSyncContextHolder.isLocked();
+        String holder = taskSyncContextHolder.getHolder();
+        int holdCount = taskSyncContextHolder.getHoldCount();
+        boolean isHeldByCurrentThread = taskSyncContextHolder.isHeldByCurrentThread();
+
+        taskSyncContextHolder.lock();
+
+        Instant afterLocking = Instant.now();
+        LOGGER.warn(
+                "With task {}, checking SyncEventHandler processRegularMessage locking had lag {} with message type: {}, message size: {}, and wasLocked {} holder thread {}, hold count {}, heldByCurrentThread {}",
+                taskSyncContextHolder.get().getTaskUid(),
+                afterLocking.toEpochMilli() - beginningRegularMessage.toEpochMilli(),
+                inSync.getMessageType(),
+                inSync.toString().length(),
+                wasLocked,
+                holder,
+                holdCount,
+                isHeldByCurrentThread);
+        try {
+
+            if (!taskSyncContextHolder.get().getRebalanceState().equals(RebalanceState.NEW_EPOCH_STARTED)) {
+                return;
+            }
+
+            LOGGER.debug("Task {} - process sync event", taskSyncContextHolder.get().getTaskUid());
+
+            taskSyncContextHolder.update(context -> SyncEventMerger.mergeIncrementalTaskSyncEvent(context, inSync));
+
+            eventConsumer.accept(new SyncEvent());
+
+            Instant afterConsuming = Instant.now();
+            LOGGER.warn(
+                    "With task {}, checking SyncEventHandler processRegularMessage overall had lag {} with message type: {}, message size: {}, and wasLocked {}, holder thread {}, hold count {}, heldByCurrentThread {}",
+                    taskSyncContextHolder.get().getTaskUid(),
+                    afterConsuming.toEpochMilli() - beginningRegularMessage.toEpochMilli(),
+                    inSync.getMessageType(),
+                    inSync.toString().length(),
+                    wasLocked,
+                    holder,
+                    holdCount,
+                    isHeldByCurrentThread);
+
+            TaskSyncEvent taskSyncEvent = taskSyncContextHolder.get().buildCurrentTaskSyncEvent();
+            Map<String, List<PartitionState>> partitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
+            if (!duplicatesInPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed incremental  event {}: found duplication in partitionsMap: {}",
+                        duplicatesInPartitions);
+            }
+
+            Map<String, List<PartitionState>> sharedPartitionsMap = taskSyncEvent.getTaskStates().values().stream()
+                    .flatMap(taskState -> taskState.getSharedPartitions().stream())
+                    .filter(
+                            partitionState -> !partitionState.getState().equals(PartitionStateEnum.FINISHED)
+                                    && !partitionState.getState().equals(PartitionStateEnum.REMOVED))
+                    .collect(Collectors.groupingBy(PartitionState::getToken));
+
+            Set<String> duplicatesInSharedPartitions = checkDuplication(sharedPartitionsMap);
+            if (!duplicatesInSharedPartitions.isEmpty()) {
+                LOGGER.warn(
+                        "processed incremental event: found duplication in sharedPartitionsMap: {}",
+                        duplicatesInSharedPartitions);
+            }
+
         }
         finally {
             taskSyncContextHolder.unlock();
@@ -169,12 +293,6 @@ public class SyncEventHandler {
     }
 
     public void processRebalanceAnswer(TaskSyncEvent inSync, SyncEventMetadata metadata) {
-        if (inSync == null) {
-            return;
-        }
-        if (skipFromPreviousGeneration(inSync)) {
-            return;
-        }
 
         taskSyncContextHolder.lock();
 
@@ -185,13 +303,78 @@ public class SyncEventHandler {
                 return;
             }
 
-            LOGGER.debug("Task {} - process sync event - rebalance answer", taskSyncContextHolder.get().getTaskUid());
+            LOGGER.info("Task {} - process sync event - rebalance answer", taskSyncContextHolder.get().getTaskUid());
 
-            taskSyncContextHolder.update(context -> SyncEventMerger.merge(context, inSync));
+            taskSyncContextHolder.update(context -> SyncEventMerger.mergeRebalanceAnswer(context, inSync));
 
         }
         finally {
             taskSyncContextHolder.unlock();
+        }
+    }
+
+    public void process(TaskSyncEvent inSync, SyncEventMetadata metadata) {
+        if (inSync == null) {
+            return;
+        }
+
+        if (skipFromPreviousGeneration(inSync)) {
+            return;
+        }
+
+        try {
+            Instant now = Instant.now();
+            if (inSync.getMessageType() == MessageTypeEnum.REGULAR) {
+                Instant regularMessageBegin = Instant.now();
+                processRegularMessage(inSync, metadata);
+                Instant regularMessageEnd = Instant.now();
+                LOGGER.warn("Task {}, regular message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        regularMessageEnd.toEpochMilli() - regularMessageBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
+            }
+            else if (inSync.getMessageType() == MessageTypeEnum.REBALANCE_ANSWER) {
+                Instant rebalanceAnswerBegin = Instant.now();
+                processRebalanceAnswer(inSync, metadata);
+                Instant rebalanceAnswerEnd = Instant.now();
+                LOGGER.warn("Task {}, rebalance message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        rebalanceAnswerEnd.toEpochMilli() - rebalanceAnswerBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
+            }
+            else if (inSync.getMessageType() == MessageTypeEnum.UPDATE_EPOCH) {
+                Instant updateEpochBegin = Instant.now();
+                processUpdateEpoch(inSync, metadata);
+                Instant updateEpochEnd = Instant.now();
+                LOGGER.warn("Task {}, update epoch message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        updateEpochEnd.toEpochMilli() - updateEpochBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
+            }
+            else if (inSync.getMessageType() == MessageTypeEnum.NEW_EPOCH) {
+                Instant newEpochBegin = Instant.now();
+                processNewEpoch(inSync, metadata);
+                Instant newEpochEnd = Instant.now();
+                LOGGER.warn("Task {}, new epoch message took {} to process with message type: {},  message size: {}",
+                        taskSyncContextHolder.get().getTaskUid(),
+                        newEpochEnd.toEpochMilli() - newEpochBegin.toEpochMilli(),
+                        inSync.getMessageType(),
+                        inSync.toString().length());
+            }
+            Instant end = Instant.now();
+            if (end.toEpochMilli() - now.toEpochMilli() > 1000) {
+                LOGGER.warn("Task {} Took very long to process this with message type: {} and message size: {} and lag {}", taskSyncContextHolder.get().getTaskUid(),
+                        inSync.getMessageType(),
+                        inSync.toString().length(),
+                        end.toEpochMilli() - now.toEpochMilli());
+            }
+        }
+
+        catch (Exception e) {
+            LOGGER.error("Exception during processing task message {}, {}", inSync, e);
         }
     }
 

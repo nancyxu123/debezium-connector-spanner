@@ -32,7 +32,7 @@ public class TaskSyncPublisher {
     private final String topic;
     private final KafkaProducer<String, byte[]> producer;
     private volatile Instant lastTime;
-    private final BufferedPublisher<TaskSyncEvent> bufferedPublisher;
+    private final BufferedPublisher bufferedPublisher;
     private final Consumer<RuntimeException> errorHandler;
 
     private final String taskUid;
@@ -45,7 +45,7 @@ public class TaskSyncPublisher {
         this.taskUid = taskUid;
 
         if (syncEventPublisherWaitingTimeout > 0) {
-            this.bufferedPublisher = new BufferedPublisher<>(
+            this.bufferedPublisher = new BufferedPublisher(
                     this.taskUid,
                     "Buffer-Pub",
                     syncEventPublisherWaitingTimeout,
@@ -82,9 +82,8 @@ public class TaskSyncPublisher {
             if (Instant.now().isAfter(sendTime.plus(Duration.ofSeconds(60)))) {
                 long seconds = Instant.now().getEpochSecond() - sendTime.getEpochSecond();
                 LOGGER.info(
-                        "Task Uid {} published record {} with {} seconds latency",
+                        "Task Uid {} published record with {} seconds latency",
                         this.taskUid,
-                        record,
                         seconds);
             }
 

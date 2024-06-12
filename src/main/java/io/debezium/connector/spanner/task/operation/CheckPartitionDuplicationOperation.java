@@ -5,7 +5,10 @@
  */
 package io.debezium.connector.spanner.task.operation;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,8 +39,11 @@ public class CheckPartitionDuplicationOperation implements Operation {
 
     private final ChangeStream changeStream;
 
+    List<String> partitionsToStopStreaming;
+
     public CheckPartitionDuplicationOperation(ChangeStream changeStream) {
         this.changeStream = changeStream;
+        this.partitionsToStopStreaming = new ArrayList<String>();
     }
 
     @Override
@@ -47,6 +53,7 @@ public class CheckPartitionDuplicationOperation implements Operation {
 
     @Override
     public TaskSyncContext doOperation(TaskSyncContext taskSyncContext) {
+        Instant begin = Instant.now();
 
         for (PartitionState partitionState : taskSyncContext.getCurrentTaskState().getPartitions()) {
 
@@ -58,16 +65,26 @@ public class CheckPartitionDuplicationOperation implements Operation {
                 continue;
             }
 
+            Instant getTasks = Instant.now();
             this.isRequiredPublishSyncEvent = needToStopStreaming(taskSyncContext.getTaskUid(), taskUidPartitionState);
 
+            Instant needStopStreaming = Instant.now();
             if (isRequiredPublishSyncEvent) {
                 taskSyncContext = stopStreaming(taskSyncContext, partitionState);
-                LOGGER.debug("Stop streaming the partition: {}", token);
+                partitionsToStopStreaming.add(partitionState.getToken());
+                LOGGER.info("Stop streaming the partition: {}", token);
             }
             else {
                 LOGGER.warn("Continue streaming the partition: {}", token);
             }
         }
+        Instant end = Instant.now();
+
+        LOGGER.warn(
+                "With task {}, Time for CheckPartitionDuplication to check all partition {}, with {} current partitions ",
+                taskSyncContext.getTaskUid(),
+                end.toEpochMilli() - begin.toEpochMilli(),
+                taskSyncContext.getCurrentTaskState().getPartitions().size());
 
         return taskSyncContext;
     }
@@ -91,6 +108,10 @@ public class CheckPartitionDuplicationOperation implements Operation {
                         || PartitionStateEnum.SCHEDULED.equals(entry.getValue().getState()))
                 .map(Map.Entry::getKey).collect(Collectors.toSet());
 
+        LOGGER.info("Conflict resolver with current task Uid: {}, tasks {}, fulltasks {}", currentTaskUid, tasks, taskUidPartitionState);
+        if (tasks == null) {
+            return false;
+        }
         return !ConflictResolver.hasPriority(currentTaskUid, tasks);
     }
 
@@ -114,5 +135,25 @@ public class CheckPartitionDuplicationOperation implements Operation {
         return taskSyncContext.toBuilder()
                 .currentTaskState(currentTaskState.toBuilder().partitions(partitions).build())
                 .build();
+    }
+
+    @Override
+    public List<String> updatedOwnedPartitions() {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public List<String> updatedSharedPartitions() {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public List<String> removedOwnedPartitions() {
+        return partitionsToStopStreaming;
+    }
+
+    @Override
+    public List<String> removedSharedPartitions() {
+        return Collections.emptyList();
     }
 }

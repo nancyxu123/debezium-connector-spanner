@@ -103,6 +103,7 @@ public class SpannerEventDispatcher extends EventDispatcher<SpannerPartition, Ta
 
         }
         catch (InterruptedException ex) {
+            LOGGER.info("Interrupting LowWatermarkStampEvent with exception {}", ex);
             Thread.currentThread().interrupt();
             return false;
         }

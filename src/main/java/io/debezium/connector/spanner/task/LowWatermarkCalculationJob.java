@@ -114,6 +114,7 @@ public class LowWatermarkCalculationJob {
 
                 }
                 catch (InterruptedException e) {
+                    LOGGER.info("Interrupting calculation thread with token with exception {}", e);
                     Thread.currentThread().interrupt();
                     return;
                 }

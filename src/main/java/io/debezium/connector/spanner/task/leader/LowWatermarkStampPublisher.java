@@ -77,6 +77,7 @@ public class LowWatermarkStampPublisher {
         }
         this.suspendFlag.set(true);
 
+        LOGGER.info("Interrupting publisher thread for task {}", this.taskSyncContextHolder.get().getTaskUid());
         this.publisherThread.interrupt();
 
         while (this.publisherThread != null) {
@@ -100,6 +101,7 @@ public class LowWatermarkStampPublisher {
                         Thread.sleep(publishInterval.toMillis());
                     }
                     catch (InterruptedException e) {
+                        LOGGER.info("Interrupting publisher thread for task {}", this.taskSyncContextHolder.get().getTaskUid());
                         Thread.currentThread().interrupt();
                     }
                 }

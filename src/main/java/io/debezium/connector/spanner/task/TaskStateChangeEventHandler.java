@@ -7,6 +7,9 @@ package io.debezium.connector.spanner.task;
 
 import static org.slf4j.LoggerFactory.getLogger;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -17,7 +20,6 @@ import io.debezium.connector.spanner.SpannerConnectorConfig;
 import io.debezium.connector.spanner.db.stream.ChangeStream;
 import io.debezium.connector.spanner.exception.SpannerConnectorException;
 import io.debezium.connector.spanner.kafka.internal.TaskSyncPublisher;
-import io.debezium.connector.spanner.task.operation.CheckPartitionDuplicationOperation;
 import io.debezium.connector.spanner.task.operation.ChildPartitionOperation;
 import io.debezium.connector.spanner.task.operation.ClearSharedPartitionOperation;
 import io.debezium.connector.spanner.task.operation.ConnectorEndDetectionOperation;
@@ -101,7 +103,7 @@ public class TaskStateChangeEventHandler {
         performOperation(
                 new ChildPartitionOperation(newPartitionsEvent.getPartitions()),
                 new FindPartitionForStreamingOperation(),
-                new CheckPartitionDuplicationOperation(changeStream),
+                // new CheckPartitionDuplicationOperation(changeStream),
                 new TakePartitionForStreamingOperation(changeStream, partitionFactory),
                 new RemoveFinishedPartitionOperation());
     }
@@ -110,7 +112,7 @@ public class TaskStateChangeEventHandler {
         TaskSyncContext taskSyncContext = performOperation(
                 new ClearSharedPartitionOperation(),
                 new TakeSharedPartitionOperation(),
-                new CheckPartitionDuplicationOperation(changeStream),
+                // new CheckPartitionDuplicationOperation(changeStream),
                 new FindPartitionForStreamingOperation(),
                 new TakePartitionForStreamingOperation(changeStream, partitionFactory),
                 new RemoveFinishedPartitionOperation(),
@@ -150,21 +152,75 @@ public class TaskStateChangeEventHandler {
 
     private TaskSyncContext performOperation(Operation... operations) throws InterruptedException {
         AtomicBoolean publishTaskSyncEvent = new AtomicBoolean(false);
+        Instant beforeLocking = Instant.now();
+        String holder = taskSyncContextHolder.getHolder();
+        boolean isLocked = taskSyncContextHolder.isLocked();
 
         taskSyncContextHolder.lock();
 
+        Instant afterLocking = Instant.now();
+
         TaskSyncContext taskSyncContext;
+
+        List<String> ownedPartitions = new ArrayList<String>();
+        List<String> sharedPartitions = new ArrayList<String>();
+        List<String> removedOwnedPartitions = new ArrayList<String>();
+        List<String> removedSharedPartitions = new ArrayList<String>();
+
+        // Possible that TaskStateChangeEventHandler took a long time.
 
         try {
             taskSyncContext = taskSyncContextHolder.updateAndGet(context -> {
                 TaskSyncContext newContext = context;
                 for (Operation operation : operations) {
+                    Instant doOperationBegin = Instant.now();
                     newContext = operation.doOperation(newContext);
                     if (operation.isRequiredPublishSyncEvent()) {
                         LOGGER.debug("Task {} - need to publish sync event for operation {}",
                                 taskSyncContextHolder.get().getTaskUid(), operation.getClass().getSimpleName());
                         publishTaskSyncEvent.set(true);
                     }
+                    if (!operation.updatedOwnedPartitions().isEmpty()) {
+                        for (String updatedOwnedPartition : operation.updatedOwnedPartitions()) {
+                            if (!ownedPartitions.contains(updatedOwnedPartition)) {
+                                ownedPartitions.add(updatedOwnedPartition);
+                            }
+                        }
+                    }
+
+                    if (!operation.removedOwnedPartitions().isEmpty()) {
+                        for (String removedOwnedPartition : operation.removedOwnedPartitions()) {
+                            if (!removedOwnedPartitions.contains(removedOwnedPartition)) {
+                                removedOwnedPartitions.add(removedOwnedPartition);
+                            }
+                        }
+                    }
+
+                    if (!operation.updatedSharedPartitions().isEmpty()) {
+                        for (String updatedSharedPartition : operation.updatedSharedPartitions()) {
+                            if (!sharedPartitions.contains(updatedSharedPartition)) {
+                                sharedPartitions.add(updatedSharedPartition);
+                            }
+                        }
+                    }
+
+                    if (!operation.removedSharedPartitions().isEmpty()) {
+                        for (String removedSharedPartition : operation.removedSharedPartitions()) {
+                            if (!removedSharedPartitions.contains(removedSharedPartition)) {
+                                removedSharedPartitions.add(removedSharedPartition);
+                            }
+                        }
+                    }
+                    Instant doOperationEnd = Instant.now();
+                    LOGGER.warn(
+                            "With task {}, Time for operation {} for TaskStateChangeEventHandler to process {} and to lock {} with isLocked {} and lock holder {} ",
+                            taskSyncContextHolder.get().getTaskUid(),
+                            operation.getClass().getSimpleName(),
+                            doOperationEnd.toEpochMilli() - doOperationBegin.toEpochMilli(),
+                            afterLocking.toEpochMilli() - beforeLocking.toEpochMilli(),
+                            isLocked,
+                            holder);
+
                 }
                 return newContext;
             });
@@ -174,8 +230,9 @@ public class TaskStateChangeEventHandler {
         }
 
         if (publishTaskSyncEvent.get()) {
-            LOGGER.debug("Task {} - send sync event", taskSyncContext.getTaskUid());
-            taskSyncPublisher.send(taskSyncContext.buildTaskSyncEvent());
+            LOGGER.info("Task {} - send sync event", taskSyncContext.getTaskUid());
+            taskSyncPublisher.send(taskSyncContext.buildIncrementalTaskSyncEvent(
+                    ownedPartitions, sharedPartitions, removedOwnedPartitions, removedSharedPartitions));
         }
 
         return taskSyncContext;

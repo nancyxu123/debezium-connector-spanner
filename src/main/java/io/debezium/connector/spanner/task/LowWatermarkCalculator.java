@@ -63,7 +63,8 @@ public class LowWatermarkCalculator {
         Set<String> duplicatesInPartitions = checkDuplication(partitionsMap);
         if (!duplicatesInPartitions.isEmpty()) {
             LOGGER.warn(
-                    "calculateLowWatermark: found duplication in partitionsMap: {}", duplicatesInPartitions);
+                    "calculateLowWatermark: found duplication in partitionsMap: {}",
+                    duplicatesInPartitions);
             return null;
         }
 
@@ -141,7 +142,7 @@ public class LowWatermarkCalculator {
             monitorOffsets(offsets, allPartitions);
         }
 
-        return allPartitions.values().stream()
+        Timestamp lowWatermarkTimestamp = allPartitions.values().stream()
                 .map(
                         partitionState -> {
                             Timestamp timestamp = offsets.get(partitionState.getToken());
@@ -151,11 +152,19 @@ public class LowWatermarkCalculator {
                             if (partitionState.getStartTimestamp() != null) {
                                 return partitionState.getStartTimestamp();
                             }
+                            LOGGER.warn("lastCommitTimestamp or startTimestamp are not specified or offsets are empty");
                             throw new IllegalStateException(
                                     "lastCommitTimestamp or startTimestamp are not specified or offsets are empty");
                         })
                 .min(Timestamp::compareTo)
                 .orElse(spannerConnectorConfig.startTime());
+        final long currentTime = new Date().getTime();
+        long currentLag = currentTime - lowWatermarkTimestamp.toDate().getTime();
+        if (currentLag > OFFSET_MONITORING_LAG_MAX_MS && printOffsets) {
+            LOGGER.warn("Very old watermark is being calculated {} with current lag {} and connector start time {}",
+                    lowWatermarkTimestamp, currentLag, spannerConnectorConfig.startTime());
+        }
+        return lowWatermarkTimestamp;
     }
 
     private void monitorOffsets(Map<String, Timestamp> offsets, Map<String, PartitionState> allPartitions) {
@@ -171,14 +180,14 @@ public class LowWatermarkCalculator {
                         String token = partitionState.getToken();
                         long lag = now - timestamp.toDate().getTime();
                         if (lag > OFFSET_MONITORING_LAG_MAX_MS) {
-                            LOGGER.warn("Partition has a very old offset, lag: {}, token: {}", lag, token);
+                            LOGGER.warn("Partition has a very old offset, lag: {}, token: {}, state: {}", lag, token, partitionState.getState());
                         }
                     }
                     else if (partitionState.getStartTimestamp() != null) {
                         String token = partitionState.getToken();
                         long lag = now - partitionState.getStartTimestamp().toDate().getTime();
                         if (lag > OFFSET_MONITORING_LAG_MAX_MS) {
-                            LOGGER.warn("Partition has a very old start time, lag: {}, token: {}", lag, token);
+                            LOGGER.warn("Partition has a very old start time, lag: {}, token: {}, state: {}", lag, token, partitionState.getState());
                         }
                     }
                 });
